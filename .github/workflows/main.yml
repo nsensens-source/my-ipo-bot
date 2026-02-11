@@ -1,15 +1,15 @@
-name: IPO Open Price Bot
+name: IPO All-in-One Bot
 
 on:
   schedule:
-    # รอบที่ 1: 03:15 UTC (10:15 น. ไทย) - ตลาดไทยเปิดแล้ว
+    # รอบที่ 1: 10:15 น. (ไทย)
     - cron: '15 3 * * *'
-    # รอบที่ 2: 15:15 UTC (22:15 น. ไทย) - ตลาด US เปิดแล้ว (รวมเวลาดีเลย์ IPO)
+    # รอบที่ 2: 22:15 น. (ไทย)
     - cron: '15 15 * * *'
-  workflow_dispatch: # กดรันเองได้
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  build-and-run:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -22,7 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests playwright yfinance
+          pip install requests playwright yfinance pytz
           playwright install chromium
 
       - name: Run Bot
