@@ -2,12 +2,9 @@ name: IPO Bot (with Trade Time)
 
 on:
   schedule:
-    # รอบ 1: 10:15 น. ไทย (เช็คหุ้นไทยเปิด)
-    - cron: '15 3 * * *'
-    # รอบ 2: 22:15 น. ไทย (เช็คหุ้น US เริ่มเข้า)
-    - cron: '15 15 * * *'
-    # รอบ 3: 01:15 น. ไทย (เช็คหุ้น US ที่เปิดดึก/สรุปยอด)
-    - cron: '15 18 * * *'
+    - cron: '15 3 * * *'  # 10:15 ไทย
+    - cron: '15 15 * * *' # 22:15 ไทย
+    - cron: '15 18 * * *' # 01:15 ไทย
   workflow_dispatch:
 
 jobs:
@@ -24,11 +21,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests playwright yfinance pytz
+          pip install requests playwright yfinance pytz supabase
           playwright install chromium
 
       - name: Run Bot
         env:
+          # --- ต้องเพิ่ม 2 บรรทัดนี้เพื่อให้บอทคุยกับ Supabase ได้ ---
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          # --------------------------------------------------
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           FINNHUB_TOKEN: ${{ secrets.FINNHUB_TOKEN }}
-        run: python ipo_bot.py
+        run: |
+          # ถ้ารีเนมไฟล์แล้ว อย่าลืมแก้ตรงนี้ให้ตรงกันครับ
+          python ipo_bot_scraper.py
+          python bot_ipo.py
