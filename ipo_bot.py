@@ -9,20 +9,29 @@ from playwright.sync_api import sync_playwright
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 FINNHUB_API_KEY = os.getenv("FINNHUB_TOKEN")
 
-def get_open_price(symbol, market="US"):
-    """ดึงราคาเปิดและราคาล่าสุด"""
+def get_stock_data(symbol, market="US"):
+    """ดึงราคาเปิด, ราคาล่าสุด และเวลาเริ่มเทรด"""
     ticker_sym = symbol if market == "US" else f"{symbol}.BK"
     try:
         ticker = yf.Ticker(ticker_sym)
-        df = ticker.history(period="1d")
+        # ดึงข้อมูลรายนาทีเพื่อหาเวลาเริ่มเทรด (ช่วง 1 วันล่าสุด)
+        df = ticker.history(period="1d", interval="1m")
+        
         if not df.empty:
+            # ข้อมูลราคา
             open_p = df['Open'].iloc[0]
-            current_p = df['Close'].iloc[0]
+            current_p = df['Close'].iloc[-1] # ราคาล่าสุดคือแท่งสุดท้าย
             diff = ((current_p - open_p) / open_p) * 100
-            return round(open_p, 2), round(current_p, 2), round(diff, 2)
-    except:
+            
+            # เวลาเริ่มเทรด (แท่งแรก) แปลงเป็นเวลาไทย
+            first_trade_utc = df.index[0]
+            first_trade_th = first_trade_utc.astimezone(pytz.timezone('Asia/Bangkok'))
+            time_str = first_trade_th.strftime('%H:%M:%S')
+            
+            return round(open_p, 2), round(current_p, 2), round(diff, 2), time_str
+    except Exception as e:
         pass
-    return None, None, None
+    return None, None, None, None
 
 def get_thai_ipo_list():
     """ใช้ Playwright ขูดข้อมูลหุ้นไทยจากเว็บ SET"""
@@ -33,18 +42,16 @@ def get_thai_ipo_list():
             page.goto("https://www.set.or.th/th/listing/ipo/upcoming-ipo/set", wait_until="networkidle", timeout=60000)
             today_th = datetime.now(pytz.timezone('Asia/Bangkok'))
             thai_year = today_th.year + 543
-            today_str = today_th.strftime(f"%d %b {thai_year}") # เช่น 11 ก.พ. 2569
+            today_str = today_th.strftime(f"%d %b {thai_year}") 
             
             rows = page.locator("tr").all_inner_texts()
             symbols = []
             for row in rows:
                 if today_str in row:
-                    # ปกติชื่อย่อหุ้นจะอยู่เป็นคำแรกในแถวของตาราง SET
                     symbols.append(row.split()[0])
             browser.close()
             return list(set(symbols))
-        except Exception as e:
-            print(f"Thai Scrape Error: {e}")
+        except:
             browser.close()
             return []
 
@@ -63,23 +70,24 @@ if __name__ == "__main__":
     now_th = datetime.now(tz_th)
     
     report = f"📊 **รายงานหุ้น IPO ประจำวันที่ {now_th.strftime('%d/%m/%Y')}** 📊\n"
-    report += "—"*15 + "\n"
+    report += f"เวลาที่เช็ค: {now_th.strftime('%H:%M:%S')}\n"
+    report += "—"*20 + "\n"
 
     # --- ส่วนที่ 1: ตลาดหุ้นไทย ---
     report += "🇹🇭 **ตลาดหุ้นไทย (SET/mai):**\n"
     thai_stocks = get_thai_ipo_list()
     if thai_stocks:
         for s in thai_stocks:
-            op, cp, diff = get_open_price(s, "TH")
+            op, cp, diff, t_time = get_stock_data(s, "TH")
             if op:
                 emoji = "🚀" if diff > 0 else "📉" if diff < 0 else "➖"
-                report += f"🔹 **{s}** | เปิด: {op} | ล่าสุด: {cp} ({diff}%) {emoji}\n"
+                report += f"🔹 **{s}** | ⏰ เริ่ม {t_time} | เปิด {op} -> ล่าสุด {cp} ({diff}%) {emoji}\n"
             else:
-                report += f"🔹 **{s}** | ⏳ รอราคาเปิด (ตลาดอาจยังไม่เปิด/ข้อมูลยังไม่เข้า)\n"
+                report += f"🔹 **{s}** | ⏳ รอตลาดเปิด/ข้อมูลยังไม่เข้า\n"
     else:
-        report += "➖ วันนี้ไม่มีหุ้น IPO ไทยเข้าใหม่\n"
+        report += "➖ ไม่มีหุ้น IPO ไทยเข้าใหม่วันนี้\n"
 
-    report += "\n" + "—"*15 + "\n"
+    report += "\n" + "—"*20 + "\n"
 
     # --- ส่วนที่ 2: ตลาดหุ้นสหรัฐฯ ---
     report += "🇺🇸 **ตลาดหุ้นสหรัฐฯ (US):**\n"
@@ -87,16 +95,15 @@ if __name__ == "__main__":
     if us_stocks:
         for s in us_stocks:
             sym = s['symbol']
-            op, cp, diff = get_open_price(sym, "US")
+            op, cp, diff, t_time = get_stock_data(sym, "US")
             if op:
                 emoji = "🚀" if diff > 0 else "📉" if diff < 0 else "➖"
-                report += f"🔹 **{sym}** | เปิด: ${op} | ล่าสุด: ${cp} ({diff}%) {emoji}\n"
+                report += f"🔹 **{sym}** | ⏰ เริ่ม {t_time} | เปิด ${op} -> ล่าสุด ${cp} ({diff}%) {emoji}\n"
             else:
-                # กรณี US IPO มักจะเปิดเทรดช่วงดึก
-                report += f"🔹 **{sym}** | ⏳ รอราคาเปิด (ระดมทุนที่ ${s.get('price')})\n"
+                price_range = s.get('price', 'N/A')
+                report += f"🔹 **{sym}** | ⏳ รอเริ่มเทรด (ช่วงราคา ${price_range})\n"
     else:
-        report += "➖ วันนี้ไม่มีหุ้น IPO สหรัฐฯ เข้าใหม่\n"
+        report += "➖ ไม่มีหุ้น IPO สหรัฐฯ เข้าใหม่วันนี้\n"
 
-    # ส่งเข้า Discord
     if DISCORD_WEBHOOK_URL:
         requests.post(DISCORD_WEBHOOK_URL, json={"content": report})
