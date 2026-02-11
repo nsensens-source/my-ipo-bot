@@ -1,0 +1,32 @@
+name: IPO Trading Bot (Daily Run)
+
+on:
+  schedule:
+    # รันทุกวันจันทร์-ศุกร์ เวลา 09:00, 12:00, 15:00 (เวลา UTC) 
+    # ปรับตามเวลาตลาดที่คุณเทรด
+    - cron: '0 2,5,8 * * 1-5' 
+  workflow_dispatch: # ปุ่มกดรันเองเพื่อทดสอบ
+
+jobs:
+  run-ipo-logic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install yfinance pandas requests supabase
+
+      - name: Execute Bot
+        env:
+          # ดึงค่าจาก GitHub Secrets
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python bot_ipo.py
