@@ -2,24 +2,23 @@ import os
 import yfinance as yf
 from supabase import create_client
 import requests
+from datetime import datetime
 
-# ดึงค่าจาก GitHub Secrets
-supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+# 1. การตั้งค่าการเชื่อมต่อ (ดึงจาก GitHub Secrets)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
 
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 def notify(msg):
-    requests.post(DISCORD_URL, json={"content": msg})
+    """ส่งข้อความแจ้งเตือนเข้า Discord"""
+    if DISCORD_URL:
+        requests.post(DISCORD_URL, json={"content": msg})
+    print(msg)
 
 def run_bot():
-    # ดึงข้อมูลหุ้นจาก Supabase
+    """ฟังก์ชันหลักสำหรับตรวจเช็คราคาและรันกลยุทธ์เทรด"""
+    # ดึงหุ้นที่ยังไม่ถูกขาย (Status: watching หรือ bought)
     res = supabase.table("ipo_trades").select("*").neq("status", "sold").execute()
-    stocks = res.data
-
-    for item in stocks:
-        ticker = item['ticker']
-        # เช็คราคาและส่งแจ้งเตือนตาม Logic ที่เราคุยกันไว้...
-        print(f"Checking {ticker}...")
-        # (ใส่ Logic การเช็คราคาและแจ้งเตือนต่อจากตรงนี้ครับ)
-
-if __name__ == "__main__":
-    run_bot()
+    stocks = res.
