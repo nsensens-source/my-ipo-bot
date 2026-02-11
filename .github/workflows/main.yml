@@ -1,0 +1,32 @@
+name: IPO Open Price Bot
+
+on:
+  schedule:
+    # รอบที่ 1: 03:15 UTC (10:15 น. ไทย) - ตลาดไทยเปิดแล้ว
+    - cron: '15 3 * * *'
+    # รอบที่ 2: 15:15 UTC (22:15 น. ไทย) - ตลาด US เปิดแล้ว (รวมเวลาดีเลย์ IPO)
+    - cron: '15 15 * * *'
+  workflow_dispatch: # กดรันเองได้
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests playwright yfinance
+          playwright install chromium
+
+      - name: Run Bot
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          FINNHUB_TOKEN: ${{ secrets.FINNHUB_TOKEN }}
+        run: python ipo_bot.py
