@@ -16,7 +16,7 @@ async def get_us_ipos(page):
         try:
             await page.wait_for_selector(".market-calendar-table__table", timeout=5000)
             tickers = await page.locator(".market-calendar-table__column--symbol").all_inner_texts()
-            clean = [{"ticker": t.strip(), "type": "IPO_US"} for t in tickers if t.strip() and t != "Symbol"]
+            clean = [{"ticker": t.strip(), "market_type": "IPO_US"} for t in tickers if t.strip() and t != "Symbol"]
             print(f"   ✅ Found {len(clean)} US IPOs")
             return clean
         except:
@@ -32,7 +32,7 @@ async def get_thai_ipos(page):
         await page.goto("https://www.settrade.com/th/ipo", wait_until="domcontentloaded", timeout=30000)
         # ลองดึงจาก Class ทั่วไปของ Settrade
         tickers = await page.locator(".symbol").all_inner_texts()
-        clean = [{"ticker": f"{t.strip()}.BK", "type": "IPO_TH"} for t in tickers if t.strip()]
+        clean = [{"ticker": f"{t.strip()}.BK", "market_type": "IPO_TH"} for t in tickers if t.strip()]
         print(f"   ✅ Found {len(clean)} Thai IPOs")
         return clean
     except Exception as e:
@@ -46,9 +46,9 @@ def get_sp500_list():
         url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
         df = pd.read_csv(url)
         # เปลี่ยน . เป็น - สำหรับ ticker เช่น BRK.B -> BRK-B
-        tickers = [{"ticker": t.replace('.', '-').strip(), "type": "SP500"} for t in df['Symbol'].tolist()]
-        print(f"   ✅ Found {len(tickers)} S&P 500 companies")
-        return tickers
+        clean = [{"ticker": t.replace('.', '-').strip(), "market_type": "SP500"} for t in df['Symbol'].tolist()]
+        print(f"   ✅ Found {len(clean)} S&P 500 companies")
+        return clean
     except Exception as e:
         print(f"   ❌ S&P 500 Error: {e}")
         return []
@@ -57,11 +57,11 @@ def inject_fallback_data():
     """ใส่ข้อมูลตัวอย่างถ้าระบบ Scrape ไม่เจออะไรเลย เพื่อให้ Monitor ทำงานได้"""
     print("⚠️ Scraping returned 0 results. Injecting SAMPLE data for testing...")
     return [
-        {"ticker": "NVDA", "type": "SP500"},  # Nvidia (Test Volatility)
-        {"ticker": "AAPL", "type": "SP500"},  # Apple (Test Base)
-        {"ticker": "RDDT", "type": "IPO_US"}, # Reddit (Test IPO)
-        {"ticker": "CPALL.BK", "type": "IPO_TH"}, # CPALL (Test Thai)
-        {"ticker": "PTT.BK", "type": "IPO_TH"}    # PTT (Test Thai)
+        {"ticker": "NVDA", "market_type": "SP500"},  # Nvidia (Test Volatility)
+        {"ticker": "AAPL", "market_type": "SP500"},  # Apple (Test Base)
+        {"ticker": "RDDT", "market_type": "IPO_US"}, # Reddit (Test IPO)
+        {"ticker": "CPALL.BK", "market_type": "IPO_TH"}, # CPALL (Test Thai)
+        {"ticker": "PTT.BK", "market_type": "IPO_TH"}    # PTT (Test Thai)
     ]
 
 async def main():
@@ -76,32 +76,34 @@ async def main():
         # 1. รวบรวมข้อมูล
         us_data = await get_us_ipos(page)
         thai_data = await get_thai_ipos(page)
-        sp500_data = get_sp500_list()
-        
-        all_data = us_data + thai_data + sp500_data
         
         await browser.close()
 
-        # 2. ถ้าไม่เจออะไรเลย ให้ใส่ข้อมูลจำลอง (Fallback)
-        if not all_data:
-            all_data = inject_fallback_data()
+    # ดึง S&P 500 (ไม่ต้องใช้ Browser)
+    sp500_data = get_sp500_list()
+    
+    all_data = us_data + thai_data + sp500_data
 
-        # 3. บันทึกลง Supabase
-        print(f"💾 Syncing {len(all_data)} tickers to Database...")
-        count = 0
-        for item in all_data:
-            try:
-                # ใช้ upsert เพื่อไม่ให้ error ถ้ามี key ซ้ำ
-                supabase.table("ipo_trades").upsert({
-                    "ticker": item['ticker'],
-                    "market_type": item['market_type'],
-                    "status": "watching"
-                }, on_conflict="ticker").execute()
-                count += 1
-            except Exception as e:
-                print(f"   Error inserting {item['ticker']}: {e}")
-                
-        print(f"✅ Successfully synced {count} tickers.")
+    # 2. ถ้าไม่เจออะไรเลย ให้ใส่ข้อมูลจำลอง (Fallback)
+    if not all_data:
+        all_data = inject_fallback_data()
+
+    # 3. บันทึกลง Supabase
+    print(f"💾 Syncing {len(all_data)} tickers to Database...")
+    count = 0
+    for item in all_data:
+        try:
+            # ใช้ upsert เพื่อไม่ให้ error ถ้ามี key ซ้ำ
+            supabase.table("ipo_trades").upsert({
+                "ticker": item['ticker'],
+                "market_type": item['market_type'],
+                "status": "watching"
+            }, on_conflict="ticker").execute()
+            count += 1
+        except Exception as e:
+            print(f"   Error inserting {item['ticker']}: {e}")
+            
+    print(f"✅ Successfully synced {count} tickers.")
 
 if __name__ == "__main__":
     asyncio.run(main())
