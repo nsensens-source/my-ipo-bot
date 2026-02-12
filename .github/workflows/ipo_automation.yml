@@ -1,14 +1,15 @@
-name: IPO System Automation
+name: Global Trading Automation
 
 on:
   schedule:
-    - cron: '15 3 * * *'   # 10:15 ไทย
-    - cron: '15 15 * * *'  # 22:15 ไทย
-    - cron: '0 21 * * 1-5' # 04:00 ไทย (สรุปยอด จ-ศ)
+    - cron: '15 3 * * *'   # 10:15 น. ไทย (เช็คหุ้นไทยเปิด)
+    - cron: '45 9 * * *'   # 16:45 น. ไทย (สรุปหุ้นไทยปิด)
+    - cron: '15 15 * * *'  # 22:15 น. ไทย (เช็คหุ้น US เปิด)
+    - cron: '15 21 * * *'  # 04:15 น. ไทย (สรุปหุ้น US ปิด)
   workflow_dispatch:
 
 jobs:
-  run-system:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,7 +18,7 @@ jobs:
           python-version: '3.10'
       - name: Install
         run: |
-          pip install requests playwright yfinance supabase
+          pip install requests playwright yfinance supabase pandas lxml
           playwright install chromium
       - name: Execute
         env:
@@ -25,8 +26,9 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          python 01_ipo_scraper.py
-          python 02_ipo_monitor.py
-          if [ "$(date +%H)" == "21" ]; then
-            python -c "from 02_ipo_monitor import send_summary; send_summary()"
+          python 01_scraper.py
+          python 02_monitor.py
+          HOUR=$(date +%H)
+          if [ "$HOUR" == "09" ] || [ "$HOUR" == "21" ]; then
+            python -c "from 02_monitor import daily_summary; daily_summary()"
           fi
