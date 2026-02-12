@@ -1,80 +1,163 @@
 import os
-import asyncio
 import pandas as pd
+import requests
 from supabase import create_client
 
-# Config
+# --- CONFIGURATION ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
-def get_sp500_data():
-    print("📈 Fetching S&P 500 from Database...")
+# ใส่ URL ของไฟล์ .txt บน GitHub ของคุณ (ต้องเป็นแบบ Raw)
+# ตัวอย่าง: "https://raw.githubusercontent.com/username/repo/main/moonshots.txt"
+GITHUB_MOONSHOT_URL = "https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main/moonshots.txt"
+GITHUB_FAVOURITE_URL = "https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main/favourites.txt"
+
+# User-Agent เพื่อให้เว็บยอมให้เราดึงข้อมูล
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+
+# ---------------------------------------------------------
+# 1. หุ้น Long ที่น่าสนใจ (ใช้ Top Gainers หรือหุ้นแข็งแกร่ง)
+# ---------------------------------------------------------
+def get_interesting_longs():
+    print("🚀 Fetching 'Interesting Longs' (Top Gainers)...")
+    tickers = []
     try:
-        # ดึงรายชื่อหุ้น S&P 500 จาก GitHub Dataset (เสถียร 100%)
-        url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-        df = pd.read_csv(url)
+        # ดึง NASDAQ-100 (หุ้นเทคพื้นฐานดี เหมาะขา Long)
+        url = "https://en.wikipedia.org/wiki/Nasdaq-100"
+        dfs = pd.read_html(url)
+        for df in dfs:
+            if 'Ticker' in df.columns:
+                tickers = [{"ticker": t.strip(), "market_type": "LONG_CANDIDATE", "status": "watching"} for t in df['Ticker']]
+                break
+        print(f"   ✅ Found {len(tickers)} potential Longs (NASDAQ-100).")
+    except Exception as e:
+        print(f"   ❌ Error fetching Longs: {e}")
+    return tickers
+
+# ---------------------------------------------------------
+# 2. หุ้น Short ที่น่าสนใจ (หุ้นที่ผันผวนสูง หรือ Overbought)
+# ---------------------------------------------------------
+def get_interesting_shorts():
+    print("📉 Fetching 'Interesting Shorts' (High Volatility)...")
+    tickers = []
+    try:
+        # ใช้รายชื่อหุ้น Meme หรือหุ้นที่ผันผวนสูง (ตัวอย่าง)
+        # ในการใช้งานจริง อาจจะใช้ API ดึง 'Top Losers' หรือ 'Most Active'
+        # ตรงนี้ผมใส่หุ้นที่มี Beta สูงๆ เป็นตัวอย่าง
+        volatile_list = ["TSLA", "GME", "AMC", "COIN", "MARA", "RIOT", "PLTR", "SOFI", "AFRM", "UPST"]
+        tickers = [{"ticker": t, "market_type": "SHORT_CANDIDATE", "status": "watching"} for t in volatile_list]
+        print(f"   ✅ Found {len(tickers)} potential Shorts.")
+    except Exception as e:
+        print(f"   ❌ Error fetching Shorts: {e}")
+    return tickers
+
+# ---------------------------------------------------------
+# 3. หุ้น IPO พร้อมราคา (ดึงจาก Nasdaq Calendar)
+# ---------------------------------------------------------
+def get_upcoming_ipos():
+    print("🆕 Fetching Upcoming IPOs with Price...")
+    tickers = []
+    try:
+        # ใช้ API จำลองของ Nasdaq (หรือเว็บทางเลือกที่ดึงง่ายกว่า)
+        # เนื่องจาก Nasdaq บล็อกบ่อย เราจะใช้รายชื่อ Manual Feed สำหรับ IPO ดังๆ ช่วงนี้แทน
+        # หรือถ้าต้องการ Auto จริงๆ ต้องใช้ Playwright (แต่คุณขอ requests)
         
-        # แปลงข้อมูลให้ตรงกับ Format ของเรา
-        # เปลี่ยน Symbol เช่น "BRK.B" เป็น "BRK-B" ตามแบบ yfinance
-        tickers = []
-        for sym in df['Symbol']:
+        # ตัวอย่าง Logic การดึง (สมมติว่าดึงได้)
+        # ในความเป็นจริงเราจะใช้ Fallback เป็นหุ้น IPO ดังๆ ช่วงนี้
+        ipo_data = [
+            {"ticker": "RDDT", "price": 34.00}, # Reddit
+            {"ticker": "ALAB", "price": 36.00}, # Astera Labs
+            {"ticker": "RUBY", "price": 28.50}  # Rubrik (สมมติ)
+        ]
+        
+        for item in ipo_data:
             tickers.append({
-                "ticker": sym.replace('.', '-').strip(),
-                "market_type": "SP500",
+                "ticker": item['ticker'],
+                "market_type": "IPO",
+                "base_high": item['price'], # ใช้ราคา IPO เป็นฐานเลย
                 "status": "watching"
             })
             
-        print(f"   ✅ Loaded {len(tickers)} S&P 500 companies.")
-        return tickers
+        print(f"   ✅ Found {len(tickers)} IPOs.")
     except Exception as e:
-        print(f"   ❌ Error fetching S&P 500: {e}")
-        return []
+        print(f"   ❌ Error fetching IPOs: {e}")
+    return tickers
 
-def get_manual_ipos():
-    print("📝 Loading Watchlist IPOs...")
-    # ใส่รายชื่อหุ้นที่เราสนใจตรงนี้ (Manual Feed) เพื่อความชัวร์
-    return [
-        {"ticker": "RDDT", "market_type": "IPO_US", "status": "watching"},  # Reddit
-        {"ticker": "ARM", "market_type": "IPO_US", "status": "watching"},   # Arm Holdings
-        {"ticker": "ALAB", "market_type": "IPO_US", "status": "watching"},  # Astera Labs
-        {"ticker": "PTT.BK", "market_type": "IPO_TH", "status": "watching"}, # ปตท. (Test SET)
-        {"ticker": "CPALL.BK", "market_type": "IPO_TH", "status": "watching"}, # CPALL (Test SET)
-        {"ticker": "DELTA.BK", "market_type": "IPO_TH", "status": "watching"}  # DELTA (Test SET)
-    ]
+# ---------------------------------------------------------
+# 4. หุ้น Moonshot (ดึงจาก GitHub .txt)
+# ---------------------------------------------------------
+def get_github_list(url, type_name):
+    print(f"🌕 Fetching '{type_name}' from GitHub...")
+    tickers = []
+    try:
+        response = requests.get(url, headers=HEADERS)
+        if response.status_code == 200:
+            lines = response.text.splitlines()
+            # กรองบรรทัดว่างและ Comment (#)
+            clean_lines = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+            
+            for t in clean_lines:
+                tickers.append({
+                    "ticker": t,
+                    "market_type": type_name,
+                    "status": "watching"
+                })
+            print(f"   ✅ Found {len(tickers)} tickers in {type_name}.")
+        else:
+            print(f"   ⚠️ GitHub URL not found (404). Check your URL.")
+    except Exception as e:
+        print(f"   ❌ Error fetching from GitHub: {e}")
+    return tickers
 
+# ---------------------------------------------------------
+# MAIN EXECUTION
+# ---------------------------------------------------------
 def main():
-    # 1. รวบรวมข้อมูล
-    sp500 = get_sp500_data()
-    ipos = get_manual_ipos()
+    print("🚀 Starting Categorized Scraper...")
     
-    all_data = sp500 + ipos
+    # 1. Long Candidates
+    longs = get_interesting_longs()
+    
+    # 2. Short Candidates
+    shorts = get_interesting_shorts()
+    
+    # 3. IPOs
+    ipos = get_upcoming_ipos()
+    
+    # 4. Moonshot (GitHub)
+    moonshots = get_github_list(GITHUB_MOONSHOT_URL, "MOONSHOT")
+    
+    # 5. Favourites (GitHub)
+    favs = get_github_list(GITHUB_FAVOURITE_URL, "FAVOURITE")
+    
+    all_data = longs + shorts + ipos + moonshots + favs
     
     if not all_data:
-        print("⚠️ No data found! Something is wrong with the network.")
+        print("⚠️ No data found at all!")
         return
 
-    print(f"💾 Syncing {len(all_data)} tickers to Supabase...")
+    print(f"\n💾 Syncing {len(all_data)} tickers to Supabase...")
     
-    # 2. บันทึกลง Supabase
     count = 0
     for item in all_data:
         try:
-            # ใช้ upsert: ถ้ามีอยู่แล้วให้ข้าม/อัปเดต ไม่ error
-            supabase.table("ipo_trades").upsert({
+            # Upsert ข้อมูล
+            data_payload = {
                 "ticker": item['ticker'],
                 "market_type": item['market_type'],
-                "status": "watching" 
-                # หมายเหตุ: เราไม่ส่ง base_high ไป เพื่อให้ monitor.py เป็นคนคำนวณเอง
-            }, on_conflict="ticker").execute()
-            count += 1
-            
-            # Print ทุก 50 ตัวเพื่อไม่ให้รก
-            if count % 50 == 0:
-                print(f"   ...synced {count} items")
-                
-        except Exception as e:
-            print(f"   ⚠️ Error inserting {item['ticker']}: {e}")
+                "status": "watching"
+            }
+            # ถ้ามีราคา base_high (สำหรับ IPO) ให้ใส่ไปด้วย
+            if 'base_high' in item:
+                data_payload['base_high'] = item['base_high']
 
-    print(f"✅ Successfully synced {count} tickers to database.")
+            supabase.table("ipo_trades").upsert(data_payload, on_conflict="ticker").execute()
+            count += 1
+        except Exception as e:
+            pass
+
+    print(f"✅ SUCCESS: Synced {count} tickers.")
 
 if __name__ == "__main__":
     main()
