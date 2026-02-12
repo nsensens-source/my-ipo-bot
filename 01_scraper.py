@@ -4,6 +4,7 @@ import pandas as pd
 from playwright.async_api import async_playwright
 from supabase import create_client
 
+# การตั้งค่าเชื่อมต่อผ่าน Environment Variables เพื่อความปลอดภัยตามหลัก Security
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 async def get_us_ipos(page):
@@ -22,10 +23,10 @@ async def get_thai_ipos(page):
 
 def get_sp500_list():
     try:
-        # ดึงลิสต์ S&P 500 จาก Wikipedia (แหล่งข้อมูลที่เสถียรที่สุดสำหรับบอทฟรี)
+        # ดึงรายชื่อหุ้น S&P 500 จาก Wikipedia
         table = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
         df = table[0]
-        return [{"ticker": t.strip(), "type": "SP500"} for t in df['Symbol'].tolist()]
+        return [{"ticker": t.replace('.', '-').strip(), "type": "SP500"} for t in df['Symbol'].tolist()]
     except: return []
 
 async def main():
@@ -33,19 +34,19 @@ async def main():
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         
-        # รวบรวมข้อมูลทุกตลาด
+        # รวบรวมข้อมูลทั้งหมด
         all_data = await get_us_ipos(page) + await get_thai_ipos(page) + get_sp500_list()
         
         for item in all_data:
-            check = supabase.table("ipo_trades").select("ticker").eq("ticker", item['ticker']).execute()
-            if not check.data:
-                supabase.table("ipo_trades").insert({
-                    "ticker": item['ticker'],
-                    "market_type": item['type'],
-                    "status": "watching"
-                }).execute()
+            # ใช้ Upsert เพื่อป้องกันข้อมูลซ้ำและอัปเดตประเภทตลาด
+            supabase.table("ipo_trades").upsert({
+                "ticker": item['ticker'],
+                "market_type": item['type'],
+                "status": "watching"
+            }, on_conflict="ticker").execute()
+            
         await browser.close()
-        print("✅ Global Scraper Finished.")
+        print(f"✅ Scraper completed: {len(all_data)} tickers synced.")
 
 if __name__ == "__main__":
     asyncio.run(main())
