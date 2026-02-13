@@ -7,7 +7,7 @@ import time
 import pandas as pd
 
 # --- ⚙️ CONFIGURATION ---
-print("⚙️ Initializing Configuration...")
+print("⚙️ Initializing Monitor (Signal Scanner)...")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
@@ -18,7 +18,7 @@ IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
 def notify(msg):
-    prefix = "🧪 [TEST] " if IS_TEST_MODE else "🟢 [PROD] "
+    prefix = "🔭 [MONITOR] " if IS_TEST_MODE else "📡 [SIGNAL] "
     try:
         requests.post(DISCORD_URL, json={"content": prefix + msg})
     except: pass
@@ -32,14 +32,13 @@ def calculate_rsi(data, window=14):
         loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
         rs = gain / loss
         rsi_series = 100 - (100 / (1 + rs))
-        # ดึงเฉพาะค่าล่าสุดออกมาเป็นตัวเลขตัวเดียว
         val = rsi_series.iloc[-1]
         return float(val) if not pd.isna(val) else 50.0
     except:
         return 50.0
 
 def run_monitor():
-    print(f"🚀 Starting Monitor Process on Table: '{TABLE_NAME}'")
+    print(f"🚀 Scanning for Signals on Table: '{TABLE_NAME}'")
     
     try:
         res = supabase.table(TABLE_NAME).select("*").execute()
@@ -53,6 +52,7 @@ def run_monitor():
         return
 
     updates_count = 0
+    signal_count = 0
     error_count = 0
 
     print("-" * 50)
@@ -62,13 +62,14 @@ def run_monitor():
         status = item.get('status', 'watching')
         m_type = item.get('market_type', 'UNKNOWN')
         
-        if status == 'sold': continue
+        # ข้ามตัวที่ขายจบไปแล้ว หรือตัวที่ส่งสัญญาณไปแล้วรอ Trader มาเก็บงาน
+        if status in ['sold', 'signal_buy', 'signal_sell']: 
+            continue
 
-        print(f"🔍 Analyzing: {ticker}", end=" ")
+        print(f"🔍 Scanning: {ticker} ({status})", end=" ")
 
         try:
             stock = yf.Ticker(ticker)
-            # ดึงราคา 2 วันล่าสุด
             hist = stock.history(period="2d")
             
             if hist.empty:
@@ -76,20 +77,19 @@ def run_monitor():
                 error_count += 1
                 continue
             
-            # บังคับเป็น float เพื่อป้องกัน format error
             current_price = float(hist['Close'].iloc[-1])
 
-            # คำนวณ RSI (ใช้ข้อมูล 1 เดือน)
+            # คำนวณ RSI
             full_hist = stock.history(period="1mo")
             rsi_val = calculate_rsi(full_hist['Close'])
             
-            # --- อัปเดตข้อมูลลง Database ---
+            # --- เตรียมข้อมูลอัปเดต ---
             update_payload = {
                 "last_price": current_price,
                 "last_update": datetime.datetime.now().isoformat()
             }
             
-            # จัดการเรื่อง Base High ถ้ายังไม่มีค่า
+            # Update Base High (ถ้ายังไม่มี)
             base_high = float(item.get('base_high') or 0)
             if base_high == 0:
                 y_hist = stock.history(period="1y")
@@ -97,22 +97,61 @@ def run_monitor():
                 update_payload['base_high'] = base_high
                 update_payload['highest_price'] = current_price
 
-            # บันทึกกลับด้วย ticker (ปลอดภัยกว่า id ถ้าโครงสร้างเปลี่ยน)
+            # --- 🚦 SIGNAL LOGIC (หัวใจสำคัญ) ---
+            is_thai = '.BK' in ticker
+            tp_pct = 0.05 if is_thai else 0.10  # TP: TH=5%, US=10%
+            sl_pct = 0.03 if is_thai else 0.05  # SL: TH=3%, US=5%
+            
+            signal_triggered = False
+
+            # Case 1: เฝ้าซื้อ (WATCHING -> SIGNAL_BUY)
+            if status == 'watching':
+                # 1.1 Breakout Strategy (Long/Base/Moonshot)
+                if any(x in m_type for x in ['LONG', 'BASE', 'MOONSHOT', 'FAVOURITE']):
+                    if base_high > 0 and current_price > base_high:
+                        update_payload['status'] = 'signal_buy'
+                        notify(f"🚀 **BREAKOUT FOUND**: {ticker} Price {current_price:.2f} > Base {base_high:.2f}")
+                        signal_triggered = True
+
+                # 1.2 Rebound Strategy (Short)
+                elif 'SHORT' in m_type:
+                    if rsi_val < 30:
+                        update_payload['status'] = 'signal_buy'
+                        notify(f"📉 **OVERSOLD FOUND**: {ticker} RSI {rsi_val:.1f} < 30")
+                        signal_triggered = True
+
+            # Case 2: เฝ้าขาย (HOLDING -> SIGNAL_SELL)
+            elif status == 'holding':
+                buy_price = float(item.get('buy_price') or 0)
+                if buy_price > 0:
+                    # 2.1 Take Profit
+                    if current_price >= buy_price * (1 + tp_pct):
+                        update_payload['status'] = 'signal_sell'
+                        notify(f"💰 **TP TARGET REACHED**: {ticker} @ {current_price:.2f} (+{tp_pct*100}%)")
+                        signal_triggered = True
+                    # 2.2 Stop Loss
+                    elif current_price <= buy_price * (1 - sl_pct):
+                        update_payload['status'] = 'signal_sell'
+                        notify(f"❌ **SL TRIGGERED**: {ticker} @ {current_price:.2f} (-{sl_pct*100}%)")
+                        signal_triggered = True
+
+            # บันทึกลง Database
             supabase.table(TABLE_NAME).update(update_payload).eq("ticker", ticker).execute()
             
             updates_count += 1
-            print(f"✅ Updated: ${current_price:.2f} | RSI: {rsi_val:.1f}")
+            if signal_triggered: signal_count += 1
+            
+            print(f"✅ Price: {current_price:.2f} | RSI: {rsi_val:.1f}" + (" [SIGNAL!!]" if signal_triggered else ""))
 
-            # ป้องกันโดน Yahoo บล็อก
-            time.sleep(0.2)
+            time.sleep(0.1)
 
         except Exception as e:
             print(f"❌ Error: {e}")
             error_count += 1
 
-    summary = f"📊 **Monitor Summary**: Updated {updates_count}, Errors {error_count}"
+    summary = f"📊 **Scan Complete**: Checked {updates_count}, Signals Found {signal_count}, Errors {error_count}"
     print("-" * 50 + f"\n{summary}")
-    if IS_TEST_MODE and updates_count > 0:
+    if IS_TEST_MODE and signal_count > 0:
         notify(summary)
 
 if __name__ == "__main__":
