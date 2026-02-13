@@ -148,7 +148,7 @@ def main():
     for item in all_data:
         try:
             # Upsert ลง DB
-            supabase.table("ipo_trades").upsert({
+            supabase.table(TABLE_NAME).upsert({
                 "ticker": item['ticker'],
                 "market_type": item['market_type'],
                 "status": "watching"
