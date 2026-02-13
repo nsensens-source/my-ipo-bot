@@ -28,6 +28,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           TEST_MODE: ${{ secrets.TEST_MODE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python 01_scraper.py
           python 02_monitor.py
