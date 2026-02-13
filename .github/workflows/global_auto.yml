@@ -20,11 +20,16 @@ jobs:
         run: |
           pip install requests playwright yfinance supabase pandas lxml
           playwright install chromium
-      - name: Execute System
+      -- name: Execute System
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          # 👇 เพิ่มบรรทัดนี้ครับ
+          TEST_MODE: ${{ secrets.TEST_MODE }}
+        run: |
+          python 01_scraper.py
+          python 02_monitor.py
         run: |
           python 01_scraper.py
           python 02_monitor.py
