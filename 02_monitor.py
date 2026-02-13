@@ -3,7 +3,6 @@ import yfinance as yf
 from supabase import create_client
 import requests
 import datetime
-import time
 
 # --- ⚙️ CONFIGURATION ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
@@ -21,9 +20,8 @@ def notify(msg):
     requests.post(DISCORD_URL, json={"content": prefix + msg})
 
 def get_market_sentiment():
-    if IS_TEST_MODE:
-        return {'TH': True, 'US': True} 
-
+    if IS_TEST_MODE: return {'TH': True, 'US': True} 
+    
     markets = {'TH': '^SET.BK', 'US': '^GSPC'}
     status = {}
     for region, ticker in markets.items():
@@ -34,75 +32,103 @@ def get_market_sentiment():
                 continue
             change = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
             status[region] = change > CRASH_THRESHOLD
-        except:
-            status[region] = True
+        except: status[region] = True
     return status
 
+def calculate_rsi(data, window=14):
+    delta = data.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
 def run_monitor():
-    print(f"🚀 Starting Monitor [{TABLE_NAME}]...")
+    print(f"🚀 Starting Dual-Strategy Monitor [{TABLE_NAME}]...")
     market_health = get_market_sentiment()
     
-    # ดึงข้อมูลหุ้นทั้งหมด
     res = supabase.table(TABLE_NAME).select("*").neq("status", "sold").execute()
     stocks = res.data
     
-    print(f"🔍 Scanning {len(stocks)} stocks for updates...")
-    
+    print(f"🔍 Scanning {len(stocks)} stocks...")
     updates_count = 0
     
     for item in stocks:
         ticker = item['ticker']
+        m_type = item.get('market_type', 'UNKNOWN') # ดูประเภทหุ้น
         region = 'TH' if '.BK' in ticker else 'US'
         
-        # Check Circuit Breaker
-        if not market_health.get(region, True):
-            continue
+        if not market_health.get(region, True): continue
 
         try:
-            # ดึงราคา
             stock = yf.Ticker(ticker)
-            # ดึงประวัติ 1 ปี เพื่อหา 52-Week High
             hist = stock.history(period="1y")
             
-            if len(hist) < 2: continue
+            if len(hist) < 20: continue # ข้อมูลน้อยเกินข้ามไปก่อน
             
             current_price = hist['Close'].iloc[-1]
-            high_52w = hist['High'].max() # ราคาสูงสุดใน 1 ปี
+            high_52w = hist['High'].max()
+            low_52w = hist['Low'].min()
             
-            # --- LOGIC การอัปเดต Database ---
-            update_data = {}
+            # คำนวณ RSI
+            hist['RSI'] = calculate_rsi(hist['Close'])
+            rsi_now = hist['RSI'].iloc[-1]
             
-            # 1. อัปเดตราคาล่าสุดเสมอ (ให้ User เห็นว่าบอททำงาน)
-            update_data['last_price'] = current_price
-            update_data['last_update'] = datetime.datetime.now().isoformat()
+            # --- 🧠 STRATEGY SELECTION (แยกสมองตรงนี้) ---
             
-            # 2. ถ้าเป็นหุ้นใหม่ (base_high เป็น NULL หรือ 0) ให้ตั้งค่าเริ่มต้น
-            if not item.get('base_high') or item.get('base_high') == 0:
-                print(f"   🆕 Init {ticker}: Base High set to {high_52w:.2f}")
-                update_data['base_high'] = high_52w
-                update_data['highest_price'] = current_price # เริ่มต้นที่ราคาปัจจุบัน
+            signal_msg = ""
             
-            # 3. เช็ค New High (All-time high ตั้งแต่บอทเฝ้า)
-            prev_highest = item.get('highest_price') or 0
-            if current_price > prev_highest:
-                update_data['highest_price'] = current_price
+            # 🟢 กลยุทธ์ 1: สำหรับหุ้นขาขึ้น (AUTO_LONG, MOONSHOT, FAVOURITE, SP500)
+            # เน้นดู Breakout หรือ Momentum
+            if "LONG" in m_type or "MOONSHOT" in m_type or "BASE" in m_type or "FAVOURITE" in m_type:
+                
+                # Logic: ราคาทำ New High หรือ RSI แรง (Bullish)
+                base_high = item.get('base_high') or high_52w
+                
+                if current_price > base_high:
+                    signal_msg = f"🚀 **BREAKOUT (Long)**: New High {current_price:.2f} > {base_high:.2f}"
+                elif rsi_now > 70:
+                    # บางคนชอบ RSI > 70 คือแรง (Super Bullish) บางคนกลัวดอย อันนี้แล้วแต่สูตร
+                    pass 
+
+            # 🔴 กลยุทธ์ 2: สำหรับหุ้นขาลง (AUTO_SHORT)
+            # เน้นดู Rebound (เด้งทำกำไรสั้นๆ) หรือ Breakdown
+            elif "SHORT" in m_type:
+                
+                # Logic A: Rebound (เล่นเด้ง) - RSI ต่ำจัดๆ
+                if rsi_now < 30:
+                    signal_msg = f"📉 **REBOUND (Short)**: Oversold RSI {rsi_now:.2f} - Potential Bounce!"
+                
+                # Logic B: Breakdown (หลุดโลว์ เดิม) - ถ้าคุณเล่น Short Sell จริงๆ
+                # if current_price < low_52w:
+                #    signal_msg = f"🩸 **BREAKDOWN**: New Low {current_price:.2f}"
+
+            # --- UPDATE & NOTIFY ---
             
-            # 4. ส่งข้อมูลกลับเข้า Database
-            supabase.table(TABLE_NAME).update(update_data).eq("id", item['id']).execute()
+            # อัปเดตราคาล่าสุดเสมอ
+            update_payload = {
+                "last_price": current_price,
+                "last_update": datetime.datetime.now().isoformat()
+            }
+            
+            # ถ้ายังไม่มี base_high ให้ตั้งค่า
+            if not item.get('base_high'):
+                update_payload['base_high'] = high_52w
+                update_payload['highest_price'] = current_price
+
+            # อัปเดต DB
+            supabase.table(TABLE_NAME).update(update_payload).eq("id", item['id']).execute()
             updates_count += 1
             
-            # (Optional) Breakout Alert
-            base_high = item.get('base_high') or high_52w
-            if current_price > base_high and item['status'] == 'watching':
-                notify(f"🚀 **BREAKOUT**: {ticker} crossed Base High ({base_high:.2f})!\nCurrent: {current_price:.2f}")
-                # สั่งซื้อ (เปลี่ยน status)
-                # supabase.table(TABLE_NAME).update({"status": "bought", "buy_price": current_price}).eq("id", item['id']).execute()
+            # ถ้าเจอสัญญาณซื้อ/ขาย และสถานะยังแค่ watching อยู่
+            if signal_msg and item['status'] == 'watching':
+                full_msg = f"⚡ **{m_type} ALERT**: {ticker}\n{signal_msg}\nPrice: {current_price:.2f}"
+                notify(full_msg)
+                # supabase.table(TABLE_NAME).update({"status": "signal_found"}).eq("id", item['id']).execute()
 
         except Exception as e:
-            # print(f"❌ Error {ticker}: {e}")
             continue
             
-    print(f"✅ Updated {updates_count} tickers in Database.")
+    print(f"✅ Updated {updates_count} tickers.")
 
 if __name__ == "__main__":
     run_monitor()
