@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import requests
 from supabase import create_client
-from io import StringIO  # <--- 1. เพิ่มบรรทัดนี้
+from io import StringIO
 
 # --- ⚙️ CONFIG & ENVIRONMENT ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
@@ -16,65 +16,75 @@ if GITHUB_TOKEN:
     HEADERS["Authorization"] = f"token {GITHUB_TOKEN}"
     
 IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
+TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
 if IS_TEST_MODE:
-    TABLE_NAME = "ipo_trades_uat"
     print(f"\n🧪 TEST MODE: ON -> Using table '{TABLE_NAME}'")
 else:
-    TABLE_NAME = "ipo_trades"
     print(f"\n🟢 PROD MODE -> Using table '{TABLE_NAME}'")
 
 REPO_BASE_URL = "https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main"
 
 # ---------------------------------------------------------
-# 1. ฐานข้อมูลตลาดหลัก
+# 1. ฐานข้อมูลตลาดหลัก (เก็บไว้เป็นฐานข้อมูลอ้างอิง)
 # ---------------------------------------------------------
 def get_external_sp500():
-    print("🇺🇸 Fetching S&P 500 from External CSV...")
+    print("🇺🇸 Fetching S&P 500 (Base)...")
     try:
         url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
         df = pd.read_csv(url)
         return [{"ticker": s.replace('.', '-').strip(), "market_type": "SP500_BASE"} for s in df['Symbol']]
     except: return []
 
-def get_external_nasdaq100():
-    print("💻 Fetching NASDAQ-100 from Wikipedia...")
+def get_external_thai_set100():
+    print("🇹🇭 Fetching SET100 (Base)...")
     try:
-        # <--- 2. แก้ตรงนี้ (กรณี Wikipedia)
-        response = requests.get('https://en.wikipedia.org/wiki/Nasdaq-100', headers=HEADERS)
-        dfs = pd.read_html(StringIO(response.text)) 
+        url = "https://en.wikipedia.org/wiki/SET100_Index"
+        response = requests.get(url, headers=HEADERS)
+        dfs = pd.read_html(StringIO(response.text))
+        tickers = []
         for df in dfs:
-            if 'Ticker' in df.columns:
-                return [{"ticker": s.strip(), "market_type": "NASDAQ_BASE"} for s in df['Ticker']]
+            if 'Symbol' in df.columns:
+                for s in df['Symbol']:
+                    clean_s = str(s).strip()
+                    if not clean_s.endswith(".BK"): clean_s += ".BK"
+                    tickers.append({"ticker": clean_s, "market_type": "SET_BASE"})
+                break
+        return tickers
     except: return []
 
 # ---------------------------------------------------------
-# 2. นักล่าหุ้นซิ่ง (แก้ตรงนี้ด้วย)
+# 2. นักล่าหุ้นซิ่ง (สูตรใหม่: 50 US / 40 TH) ⚖️
 # ---------------------------------------------------------
 def get_market_movers():
-    print("🚀 Scanning Market Movers (Smart Region Detection)...")
+    print("🚀 Scanning Market Movers (Balanced Strategy)...")
     tickers = []
     
+    # กำหนดเป้าหมายและจำนวนที่จะดึง (Limit)
     targets = [
-        ("https://finance.yahoo.com/gainers", "AUTO_LONG_US"),
-        ("https://finance.yahoo.com/losers", "AUTO_SHORT_US"),
-        ("https://finance.yahoo.com/most-active", "AUTO_ACTIVE_US"),
-        ("https://finance.yahoo.com/most-active?region=TH", "AUTO_ACTIVE_TH"),
-        ("https://finance.yahoo.com/gainers?region=TH", "AUTO_LONG_TH")
+        # --- 🇺🇸 US MARKET (Total 50) ---
+        # 1. US Gainers (25 ตัว) -> ขาขึ้น
+        ("https://finance.yahoo.com/gainers", "AUTO_LONG_US", 25),
+        # 2. US Losers (25 ตัว) -> ขาลง (Short/Rebound)
+        ("https://finance.yahoo.com/losers", "AUTO_SHORT_US", 25),
+        
+        # --- 🇹🇭 THAI MARKET (Total 40) ---
+        # 3. TH Gainers (20 ตัว) -> ขาขึ้น
+        ("https://finance.yahoo.com/gainers?region=TH", "AUTO_LONG_TH", 20),
+        # 4. TH Losers (20 ตัว) -> ขาลง
+        ("https://finance.yahoo.com/losers?region=TH", "AUTO_SHORT_TH", 20)
     ]
     
-    for url, default_m_type in targets:
+    for url, m_type, limit in targets:
+        print(f"   👉 Scraping {m_type} (Limit: {limit})...")
         try:
             response = requests.get(url, headers=HEADERS)
-            
-            # <--- 3. แก้ตรงนี้ (หัวใจสำคัญที่ทำให้หาย Error)
             dfs = pd.read_html(StringIO(response.text))
-            
             if not dfs: continue 
 
             df = dfs[0]
             
-            # หา Column Symbol
+            # หา Column ชื่อหุ้น
             symbol_col = None
             possible_names = ['Symbol', 'Ticker', 'ชื่อย่อ', 'สัญลักษณ์']
             for col in df.columns:
@@ -83,33 +93,46 @@ def get_market_movers():
                     break
             if not symbol_col: symbol_col = df.columns[0]
             
-            for raw_symbol in df[symbol_col].head(15):
+            # วนลูปตามจำนวน Limit ที่ตั้งไว้ (25 หรือ 20)
+            count_found = 0
+            for raw_symbol in df[symbol_col]:
+                if count_found >= limit: break # ครบจำนวนแล้วหยุด
+                
                 symbol_str = str(raw_symbol).strip()
                 
-                if ".BK" in symbol_str:
-                    final_ticker = symbol_str
-                    final_m_type = "AUTO_ACTIVE_TH"
-                elif ".F" in symbol_str:
-                    continue
+                # --- LOGIC แยกสัญชาติ ---
+                
+                # ถ้าเป็นโหมดไทย (URL มี region=TH)
+                if "_TH" in m_type:
+                    # ต้องมี .BK (ถ้าไม่มีเติมให้)
+                    if ".BK" not in symbol_str:
+                        final_ticker = f"{symbol_str}.BK"
+                    else:
+                        final_ticker = symbol_str
+                    
+                    # กรองหุ้นต่างด้าว (.F) หรือ Warrant (.W) ที่ไม่อยากเล่น
+                    if ".F.BK" in final_ticker: continue 
+                    
+                # ถ้าเป็นโหมด US
                 else:
                     final_ticker = symbol_str
-                    if "_TH" in default_m_type:
-                        final_m_type = "AUTO_ACTIVE_US"
-                    else:
-                        final_m_type = default_m_type
+                    # ถ้าชื่อมี .BK หลุดมาในโหมด US (เป็นไปได้ยากแต่กันไว้) ให้ข้าม
+                    if ".BK" in final_ticker: continue
 
-                if "^" in final_ticker or "USD" in final_ticker:
-                    continue
+                # กรองขยะทั่วไป
+                if "^" in final_ticker or "USD" in final_ticker: continue
 
-                tickers.append({"ticker": final_ticker, "market_type": final_m_type})
+                tickers.append({"ticker": final_ticker, "market_type": m_type})
+                count_found += 1
                 
-        except Exception:
+        except Exception as e:
+            print(f"      ⚠️ Error: {e}")
             pass
         
     return tickers
 
 # ---------------------------------------------------------
-# 3. User Manual (GitHub)
+# 3. User Manual
 # ---------------------------------------------------------
 def get_user_manual_list(filename, type_name):
     print(f"🌕 Fetching '{filename}' from User GitHub...")
@@ -129,10 +152,15 @@ def get_user_manual_list(filename, type_name):
 # MAIN
 # ---------------------------------------------------------
 def main():
-    print("🤖 Starting Smart Scraper (Clean Log)...")
+    print("🤖 Starting Balanced Scraper...")
     
-    base_data = get_external_sp500() + get_external_nasdaq100()
+    # 1. Base (เก็บไว้ดูภาพรวม)
+    base_data = get_external_sp500() + get_external_thai_set100()
+    
+    # 2. Hunters (พระเอกของเรา: 90 ตัว)
     hunter_data = get_market_movers()
+    
+    # 3. Manual
     manual_data = get_user_manual_list("moonshots.txt", "MOONSHOT") + \
                   get_user_manual_list("favourites.txt", "FAVOURITE")
     
@@ -157,6 +185,9 @@ def main():
         except: pass
 
     print(f"✅ SUCCESS: Synced {count} tickers.")
+    print(f"   - Base Markets: {len(base_data)}")
+    print(f"   - Hunters (Active): {len(hunter_data)}")
+    print(f"   - User Manual: {len(manual_data)}")
 
 if __name__ == "__main__":
     main()
