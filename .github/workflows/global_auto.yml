@@ -1,4 +1,4 @@
-name: Global Trading Bot (Production + UAT)
+name: Global Trading Bot (Main System)
 
 on:
   schedule:
