@@ -1,0 +1,26 @@
+name: Favourite Sniper Bot
+
+on:
+  schedule:
+    # รันทุกชั่วโมง (นาทีที่ 30) ตั้งแต่ 2 ทุ่ม - ตี 4 (เวลาไทย) ช่วงตลาด US เปิด
+    - cron: '30 13-21 * * 1-5' 
+    # รันช่วงเช้าสำหรับหุ้นไทย (10:30, 11:30, 14:30, 15:30)
+    - cron: '30 3,4,7,8 * * 1-5'
+  workflow_dispatch: # กดรันมือได้ตลอดเวลา
+
+jobs:
+  sniper-mode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Dependencies
+        run: pip install requests yfinance supabase pandas
+      - name: Run Sniper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python 03_fav_monitor.py
