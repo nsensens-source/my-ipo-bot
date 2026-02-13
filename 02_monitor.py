@@ -2,52 +2,33 @@ import os
 import yfinance as yf
 from supabase import create_client
 import requests
+import datetime
 
-
-# --- ⚙️ CONFIG & ENVIRONMENT ---
+# --- ⚙️ CONFIGURATION ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
-# รับค่า TEST_MODE (On/Off)
+
+# รับค่า TEST_MODE
 IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 
 # เลือกตารางอัตโนมัติ
-if IS_TEST_MODE:
-    TABLE_NAME = "ipo_trades_uat"
-    print(f"\n🧪 TEST MODE: ON -> Using table '{TABLE_NAME}'")
-else:
-    TABLE_NAME = "ipo_trades"
-    print(f"\n🟢 PROD MODE -> Using table '{TABLE_NAME}'")
+TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
-# -------------------------------
-
-# รับค่าจาก Secrets (ถ้าไม่ตั้งค่ามา จะถือว่าเป็น 'Off' โดยอัตโนมัติ)
-# แปลงเป็นตัวพิมพ์เล็กเพื่อให้ 'On', 'ON', 'on' ใช้ได้หมด
-TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower()
-
-# Setting
+# Settings
 STOP_LOSS_IPO = 0.08
 STOP_LOSS_SP500 = 0.04
 CRASH_THRESHOLD = -1.5 
 
 def notify(msg):
-    requests.post(DISCORD_URL, json={"content": msg})
+    prefix = "🧪 [TEST] " if IS_TEST_MODE else ""
+    requests.post(DISCORD_URL, json={"content": prefix + msg})
 
 def get_market_sentiment():
-    """เช็คสุขภาพตลาด (Circuit Breaker)"""
-    
-    # --- 🧪 TEST MODE LOGIC ---
-    # ถ้า TEST_MODE เป็น 'on' ให้ข้ามการเช็คตลาดทั้งหมด
-    if TEST_MODE == "on":
-        print("\n🧪 =========================================")
-        print("🧪 TEST MODE: ACTIVATED (On)")
-        print("🧪 Bypassing Market Health & Time Checks...")
-        print("🧪 =========================================\n")
-        # ส่งค่ากลับไปว่า ตลาดปกติ 100% (Green Light)
+    if IS_TEST_MODE:
+        print(f"🧪 TEST MODE ON: Using Table '{TABLE_NAME}' & Bypassing Circuit Breaker.")
         return {'TH': True, 'US': True} 
-    # ---------------------------
 
-    # ... (Logic ปกติสำหรับการเช็คตลาด) ...
-    print("🛡️ Checking Market Health (Normal Mode)...")
+    print(f"🛡️ PROD MODE: Using Table '{TABLE_NAME}' & Checking Market Health...")
     markets = {'TH': '^SET.BK', 'US': '^GSPC'}
     status = {}
     
@@ -57,101 +38,86 @@ def get_market_sentiment():
             if len(df) < 2:
                 status[region] = True
                 continue
-
             prev = df['Close'].iloc[-2]
             curr = df['Close'].iloc[-1]
             change = ((curr - prev) / prev) * 100
-            
-            is_safe = change > CRASH_THRESHOLD
-            status[region] = is_safe
-            
-            if not is_safe:
-                notify(f"⛔ **CIRCUIT BREAKER ({region})**\nMarket dropped {change:.2f}%. Buying disabled.")
+            status[region] = change > CRASH_THRESHOLD
         except:
             status[region] = True
             
     return status
 
 def run_monitor():
-    # 1. เช็คตลาด
+    start_time = datetime.datetime.now()
     market_health = get_market_sentiment()
     
-    # 2. ดึงหุ้นในพอร์ต
+    # ดึงข้อมูลจาก DB
     res = supabase.table(TABLE_NAME).select("*").neq("status", "sold").execute()
+    stocks = res.data
     
-    for item in res.data:
+    print(f"🔍 Scanning {len(stocks)} stocks...")
+    
+    scanned_count = 0
+    error_count = 0
+    action_count = 0
+
+    for item in stocks:
         ticker = item['ticker']
-        m_type = item['market_type']
+        market_type = item.get('market_type', 'UNKNOWN')
         
-        # ระบุโซนตลาด
-        region = 'TH' if 'BK' in ticker else 'US'
+        # Determine Region
+        region = 'TH' if '.BK' in ticker else 'US'
         
-        # ดึงข้อมูลกราฟ
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="1y")
-        if len(df) < 20: continue
-
-        curr_p = df['Close'].iloc[-1]
-        hi_p = df['High'].iloc[-1]
-        curr_vol = df['Volume'].iloc[-1]
-        avg_vol = df['Volume'].tail(20).mean()
-        rvol = curr_vol / avg_vol if avg_vol > 0 else 0
-
-        # --- A. ตั้งราคาฐาน (Base) ---
-        if not item['base_high'] or item['base_high'] == 0:
-            # IPO ใช้ High วันแรก | SP500 ใช้ High 52 สัปดาห์
-            base = df['High'].iloc[0] if 'IPO' in m_type else df['High'].max()
-            supabase.table(TABLE_NAME).update({"base_high": base}).eq("ticker", ticker).execute()
+        # Check Circuit Breaker (Skip if market crashed)
+        if not market_health.get(region, True):
+            print(f"   ⛔ Skip {ticker} (Market Unsafe)")
             continue
 
-        # --- B. สัญญาณซื้อ (Buy Logic) ---
-        is_safe = market_health.get(region, True)
-        breakout = curr_p > item['base_high']
-        vol_spike = rvol > 2.0 if m_type == "SP500" else True # SP500 ต้องมี Volume เข้า
-        
-        if item['status'] == 'watching':
-            if not is_safe:
-                print(f"Skipping BUY {ticker}: Market Risk")
+        try:
+            # Get Data
+            stock = yf.Ticker(ticker)
+            df = stock.history(period="1y") # 1 Year for 52-week High
+            
+            if len(df) < 2:
+                error_count += 1
                 continue
                 
-            if breakout and vol_spike:
-                msg = f"🚀 **BUY SIGNAL! {ticker} ({m_type})**\nPrice: {curr_p:.2f} | Base: {item['base_high']:.2f}"
+            current_price = df['Close'].iloc[-1]
+            scanned_count += 1
+            
+            # --- TRADING LOGIC (Simplified for monitor) ---
+            # 1. Breakout Check (Example Logic)
+            # หา High สูงสุดในรอบ 1 ปี (ไม่รวมวันนี้)
+            high_52w = df['High'][:-1].max() if len(df) > 1 else current_price
+            
+            # ถ้าวันนี้ราคาทะลุ High เดิม (New High) -> BUY SIGNAL
+            if current_price > high_52w and item['status'] == 'watching':
+                msg = f"🚀 **BREAKOUT ALERT**: {ticker} hit New 52-Week High!\nPrice: {current_price:.2f}"
                 notify(msg)
-                supabase.table(TABLE_NAME).update({
-                    "status": "bought", "buy_price": curr_p, "highest_price": hi_p
-                }).eq("ticker", ticker).execute()
-
-        # --- C. สัญญาณขาย (Dynamic Trailing Stop) ---
-        elif item['status'] == 'bought':
-            # เลือก % Stop Loss ตามประเภทหุ้น
-            stop_pct = STOP_LOSS_IPO if 'IPO' in m_type else STOP_LOSS_SP500
-            
-            # คำนวณจุดหนีตาย
-            highest = max(item['highest_price'] or 0, hi_p)
-            stop_price = highest * (1 - stop_pct)
-            
-            if curr_p < stop_price:
-                pl = ((curr_p - item['buy_price']) / item['buy_price']) * 100
-                notify(f"⚠️ **SELL! {ticker}**\nExit: {curr_p:.2f} (P/L: {pl:+.2f}%)")
-                supabase.table(TABLE_NAME).update({"status": "sold"}).eq("ticker", ticker).execute()
+                # Update Status (ในระบบจริงจะสั่งซื้อตรงนี้)
+                # supabase.table(TABLE_NAME).update({"status": "bought"}).eq("ticker", ticker).execute()
+                action_count += 1
                 
-            elif hi_p > (item['highest_price'] or 0):
-                # New High -> เลื่อนจุด Stop ตามขึ้นไป
-                supabase.table(TABLE_NAME).update({"highest_price": hi_p}).eq("ticker", ticker).execute()
+        except Exception as e:
+            # print(f"   ❌ Error {ticker}: {e}") # ปิด Error เพื่อความสะอาดใน Log
+            error_count += 1
+            continue
 
-def daily_summary():
-    """สรุปกำไรรายวัน (รันเฉพาะตอนจบวัน)"""
-    res = supabase.table(TABLE_NAME).select("*").eq("status", "bought").execute()
-    if not res.data: return
-    msg = "📊 **Portfolio Snapshot**\n"
-    for i in res.data:
-        try:
-            p = yf.Ticker(i['ticker']).history(period="1d")['Close'].iloc[-1]
-            pl = ((p - i['buy_price']) / i['buy_price']) * 100
-            emoji = "🟢" if pl > 0 else "🔴"
-            msg += f"{emoji} {i['ticker']}: {pl:+.2f}%\n"
-        except: pass
-    notify(msg)
+    # --- REPORTING (เฉพาะ TEST MODE หรือจบวัน) ---
+    end_time = datetime.datetime.now()
+    duration = end_time - start_time
+    
+    print(f"✅ Finished. Scanned: {scanned_count}, Errors: {error_count}, Actions: {action_count}")
+    
+    # ถ้าเป็น Test Mode ให้ส่งสรุปเข้า Discord เสมอ จะได้รู้ว่ารันจบ
+    if IS_TEST_MODE:
+        summary = f"📊 **SCAN COMPLETE (TEST MODE)**\n"
+        summary += f"• Table: `{TABLE_NAME}`\n"
+        summary += f"• Scanned: {scanned_count} tickers\n"
+        summary += f"• Errors/Delisted: {error_count}\n"
+        summary += f"• Actions Triggered: {action_count}\n"
+        summary += f"• Time Taken: {duration}"
+        notify(summary)
 
 if __name__ == "__main__":
     run_monitor()
