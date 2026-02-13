@@ -101,7 +101,7 @@ def run_monitor():
         if not item['base_high'] or item['base_high'] == 0:
             # IPO ใช้ High วันแรก | SP500 ใช้ High 52 สัปดาห์
             base = df['High'].iloc[0] if 'IPO' in m_type else df['High'].max()
-            supabase.table("ipo_trades").update({"base_high": base}).eq("ticker", ticker).execute()
+            supabase.table(TABLE_NAME).update({"base_high": base}).eq("ticker", ticker).execute()
             continue
 
         # --- B. สัญญาณซื้อ (Buy Logic) ---
@@ -117,7 +117,7 @@ def run_monitor():
             if breakout and vol_spike:
                 msg = f"🚀 **BUY SIGNAL! {ticker} ({m_type})**\nPrice: {curr_p:.2f} | Base: {item['base_high']:.2f}"
                 notify(msg)
-                supabase.table("ipo_trades").update({
+                supabase.table(TABLE_NAME).update({
                     "status": "bought", "buy_price": curr_p, "highest_price": hi_p
                 }).eq("ticker", ticker).execute()
 
@@ -133,15 +133,15 @@ def run_monitor():
             if curr_p < stop_price:
                 pl = ((curr_p - item['buy_price']) / item['buy_price']) * 100
                 notify(f"⚠️ **SELL! {ticker}**\nExit: {curr_p:.2f} (P/L: {pl:+.2f}%)")
-                supabase.table("ipo_trades").update({"status": "sold"}).eq("ticker", ticker).execute()
+                supabase.table(TABLE_NAME).update({"status": "sold"}).eq("ticker", ticker).execute()
                 
             elif hi_p > (item['highest_price'] or 0):
                 # New High -> เลื่อนจุด Stop ตามขึ้นไป
-                supabase.table("ipo_trades").update({"highest_price": hi_p}).eq("ticker", ticker).execute()
+                supabase.table(TABLE_NAME).update({"highest_price": hi_p}).eq("ticker", ticker).execute()
 
 def daily_summary():
     """สรุปกำไรรายวัน (รันเฉพาะตอนจบวัน)"""
-    res = supabase.table("ipo_trades").select("*").eq("status", "bought").execute()
+    res = supabase.table(TABLE_NAME).select("*").eq("status", "bought").execute()
     if not res.data: return
     msg = "📊 **Portfolio Snapshot**\n"
     for i in res.data:
