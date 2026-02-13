@@ -3,9 +3,21 @@ import pandas as pd
 import requests
 from supabase import create_client
 
-# --- CONFIGURATION ---
+# --- ⚙️ CONFIG & ENVIRONMENT ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
+# รับค่า TEST_MODE (On/Off)
+IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
+
+# เลือกตารางอัตโนมัติ
+if IS_TEST_MODE:
+    TABLE_NAME = "ipo_trades_uat"
+    print(f"\n🧪 TEST MODE: ON -> Using table '{TABLE_NAME}'")
+else:
+    TABLE_NAME = "ipo_trades"
+    print(f"\n🟢 PROD MODE -> Using table '{TABLE_NAME}'")
+
+# -------------------------------
 # Headers จำเป็นมาก เพื่อไม่ให้ Yahoo/Wiki บล็อก
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
