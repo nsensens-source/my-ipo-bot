@@ -7,9 +7,11 @@ from supabase import create_client
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
+# Headers จำเป็นมาก เพื่อไม่ให้ Yahoo/Wiki บล็อก
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
+
 if GITHUB_TOKEN:
     # เพิ่มบรรทัดนี้เพื่อให้เข้าถึง Private Repo ได้
     HEADERS["Authorization"] = f"token {GITHUB_TOKEN}"
@@ -25,14 +27,8 @@ else:
     TABLE_NAME = "ipo_trades"
     print(f"\n🟢 PROD MODE -> Using table '{TABLE_NAME}'")
 
-# -------------------------------
-# Headers จำเป็นมาก เพื่อไม่ให้ Yahoo/Wiki บล็อก
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-}
-
-# ใส่ URL ของไฟล์ GitHub ของคุณที่นี่ (ต้องเป็น Raw Link)
-"https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main"
+# 👇 แก้ไขตรงนี้: ใส่ตัวแปร REPO_BASE_URL ให้ถูกต้อง
+REPO_BASE_URL = "https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main"
 
 # ---------------------------------------------------------
 # 1. ฐานข้อมูลตลาดหลัก (External Sources Only)
@@ -84,23 +80,40 @@ def get_market_movers():
         try:
             response = requests.get(url, headers=HEADERS)
             dfs = pd.read_html(response.text)
-            df = dfs[0]
+            
+            if not dfs: continue # ถ้าไม่เจอตาราง ข้าม
+
+            df = dfs[0] # เอาตารางแรกเสมอ
+            
+            # หาชื่อ column ที่เก็บ Symbol (บางที Yahoo เปลี่ยนชื่อไปมา)
+            symbol_col = None
+            possible_names = ['Symbol', 'Ticker', 'ชื่อย่อ', 'สัญลักษณ์']
+            
+            for col in df.columns:
+                if col in possible_names:
+                    symbol_col = col
+                    break
+            
+            if not symbol_col:
+                # ถ้าหาไม่เจอจริงๆ ลองเดาว่าเป็น Column แรก
+                symbol_col = df.columns[0]
             
             # ดึง 10 ตัวแรกของแต่ละหมวด
-            for symbol in df['Symbol'].head(10):
-                clean_sym = symbol.split('.')[0] # ตัดนามสกุลออกก่อน
+            for symbol in df[symbol_col].head(10):
+                clean_sym = str(symbol).split('.')[0] # ตัดนามสกุลออกก่อน
                 
                 # ถ้าเป็นโหมดไทย ต้องเติม .BK กลับเข้าไปเพื่อให้ yfinance อ่านออก
-                if "_TH" in m_type and ".BK" not in symbol:
+                if "_TH" in m_type and ".BK" not in str(symbol):
                     final_ticker = f"{clean_sym}.BK"
-                elif "_TH" in m_type and ".BK" in symbol:
-                    final_ticker = symbol # ถ้ามีอยู่แล้วก็ใช้เลย
+                elif "_TH" in m_type and ".BK" in str(symbol):
+                    final_ticker = symbol 
                 else:
                     final_ticker = clean_sym # ตลาด US ไม่ต้องมีนามสกุล
 
                 tickers.append({"ticker": final_ticker, "market_type": m_type})
+                
         except Exception as e:
-            print(f"   ⚠️ Error scraping {url}: {e}")
+            # print(f"   ⚠️ Error scraping {url}: {e}") # ปิด error เล็กน้อยเพื่อความสะอาด
             pass
         
     return tickers
@@ -113,8 +126,7 @@ def get_user_manual_list(filename, type_name):
     print(f"🌕 Fetching '{filename}' from User GitHub...")
     tickers = []
     try:
-        # ต่อ URL ให้ถูกต้อง (ตัด refs/heads ออก เพื่อความชัวร์ใช้โครงสร้างนี้)
-        # โครงสร้าง Raw: https://raw.githubusercontent.com/{User}/{Repo}/{Branch}/{File}
+        # ต่อ URL ให้ถูกต้อง
         url = f"{REPO_BASE_URL}/{filename}"
         
         # ส่ง HEADERS ที่มี Token ไปด้วย
