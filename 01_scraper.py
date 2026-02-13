@@ -5,7 +5,15 @@ from supabase import create_client
 
 # --- ⚙️ CONFIG & ENVIRONMENT ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ...",
+}
+if GITHUB_TOKEN:
+    # เพิ่มบรรทัดนี้เพื่อให้เข้าถึง Private Repo ได้
+    HEADERS["Authorization"] = f"token {GITHUB_TOKEN}"
+    
 # รับค่า TEST_MODE (On/Off)
 IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 
@@ -24,7 +32,7 @@ HEADERS = {
 }
 
 # ใส่ URL ของไฟล์ GitHub ของคุณที่นี่ (ต้องเป็น Raw Link)
-REPO_BASE_URL = "https://raw.githubusercontent.com/YOUR_GITHUB_USER/YOUR_REPO/main"
+"https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main"
 
 # ---------------------------------------------------------
 # 1. ฐานข้อมูลตลาดหลัก (External Sources Only)
@@ -102,21 +110,27 @@ def get_market_movers():
 # ---------------------------------------------------------
 
 def get_user_manual_list(filename, type_name):
-    """อ่านไฟล์ .txt จาก GitHub ของคุณ"""
     print(f"🌕 Fetching '{filename}' from User GitHub...")
     tickers = []
     try:
+        # ต่อ URL ให้ถูกต้อง (ตัด refs/heads ออก เพื่อความชัวร์ใช้โครงสร้างนี้)
+        # โครงสร้าง Raw: https://raw.githubusercontent.com/{User}/{Repo}/{Branch}/{File}
         url = f"{REPO_BASE_URL}/{filename}"
-        if "YOUR_GITHUB_USER" in url: return [] # กัน User ลืมแก้ URL
         
+        # ส่ง HEADERS ที่มี Token ไปด้วย
         response = requests.get(url, headers=HEADERS)
+        
         if response.status_code == 200:
             lines = response.text.splitlines()
-            # กรองบรรทัดว่างและ Comment
             clean_lines = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
             tickers = [{"ticker": t, "market_type": type_name} for t in clean_lines]
             print(f"   ✅ Found {len(tickers)} items in {filename}")
-    except: pass
+        else:
+            print(f"   ⚠️ Failed to fetch {filename} (Status: {response.status_code})")
+            print(f"      URL: {url}")
+    except Exception as e: 
+        print(f"   ❌ Error: {e}")
+        pass
     return tickers
 
 # ---------------------------------------------------------
