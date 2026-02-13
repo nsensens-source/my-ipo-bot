@@ -3,26 +3,40 @@ import yfinance as yf
 from supabase import create_client
 import requests
 
-# --- ⚙️ CONFIGURATION ZONE (ตั้งค่าความเสี่ยงตรงนี้) ---
-# ความลึกของ Trailing Stop (ยิ่งเยอะ ยิ่งทนการเหวี่ยงได้มาก)
-STOP_LOSS_IPO = 0.08    # IPO ให้ลบได้ 8% (เผื่อการสะบัด)
-STOP_LOSS_SP500 = 0.04  # หุ้นใหญ่ ให้ลบได้แค่ 4% (เน้นเซฟกำไร)
-
-# Circuit Breaker: ถ้าตลาดลบหนักกว่าค่านี้ ให้หยุดซื้อ
-CRASH_THRESHOLD = -1.5 
-# ----------------------------------------------------
-
+# --- CONFIG & SECRETS ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
+
+# รับค่าจาก Secrets (ถ้าไม่ตั้งค่ามา จะถือว่าเป็น 'Off' โดยอัตโนมัติ)
+# แปลงเป็นตัวพิมพ์เล็กเพื่อให้ 'On', 'ON', 'on' ใช้ได้หมด
+TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower()
+
+# Setting
+STOP_LOSS_IPO = 0.08
+STOP_LOSS_SP500 = 0.04
+CRASH_THRESHOLD = -1.5 
 
 def notify(msg):
     requests.post(DISCORD_URL, json={"content": msg})
 
 def get_market_sentiment():
     """เช็คสุขภาพตลาด (Circuit Breaker)"""
+    
+    # --- 🧪 TEST MODE LOGIC ---
+    # ถ้า TEST_MODE เป็น 'on' ให้ข้ามการเช็คตลาดทั้งหมด
+    if TEST_MODE == "on":
+        print("\n🧪 =========================================")
+        print("🧪 TEST MODE: ACTIVATED (On)")
+        print("🧪 Bypassing Market Health & Time Checks...")
+        print("🧪 =========================================\n")
+        # ส่งค่ากลับไปว่า ตลาดปกติ 100% (Green Light)
+        return {'TH': True, 'US': True} 
+    # ---------------------------
+
+    # ... (Logic ปกติสำหรับการเช็คตลาด) ...
+    print("🛡️ Checking Market Health (Normal Mode)...")
     markets = {'TH': '^SET.BK', 'US': '^GSPC'}
     status = {}
-    print("🛡️ Checking Market Health...")
     
     for region, ticker in markets.items():
         try:
