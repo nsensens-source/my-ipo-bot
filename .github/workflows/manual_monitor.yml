@@ -1,0 +1,28 @@
+name: Manual Monitor Run
+
+on:
+  workflow_dispatch: # ทำให้มีปุ่มกดรันเองได้
+
+jobs:
+  monitor_job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install pandas requests supabase yfinance
+
+      - name: Execute Monitor
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TEST_MODE: ${{ secrets.TEST_MODE }}
+        run: python 02_monitor.py
