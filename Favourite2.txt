@@ -1,0 +1,99 @@
+# --- หุ้นเทคโนโลยีสหรัฐฯ (US Tech Giants) ---
+NVDA
+TSLA
+AAPL
+MSFT
+GOOGL
+AMZN
+META
+AMD
+NFLX
+PLTR
+COIN
+MSTR
+SMCI
+AVGO
+ARM
+TSM
+
+# --- หุ้นไทย: กลุ่มเทคโนโลยี & อิเล็กทรอนิกส์ ---
+DELTA.BK
+HANA.BK
+KCE.BK
+ADVANC.BK
+TRUE.BK
+INTUCH.BK
+COM7.BK
+
+# --- หุ้นไทย: กลุ่มพลังงาน & โรงไฟฟ้า ---
+PTT.BK
+PTTEP.BK
+PTTGC.BK
+OR.BK
+TOP.BK
+IVL.BK
+GULF.BK
+GPSC.BK
+BGRIM.BK
+EA.BK
+EGCO.BK
+RATCH.BK
+BANPU.BK
+GUNKUL.BK
+
+# --- หุ้นไทย: กลุ่มธนาคาร & การเงิน ---
+KBANK.BK
+SCB.BK
+BBL.BK
+KTB.BK
+TTB.BK
+TISCO.BK
+KKP.BK
+KTC.BK
+MTC.BK
+SAWAD.BK
+TIDLOR.BK
+JMT.BK
+JMART.BK
+
+# --- หุ้นไทย: กลุ่มค้าปลีก & บริการ ---
+CPALL.BK
+CPAXT.BK
+CRC.BK
+CPN.BK
+HMPRO.BK
+GLOBAL.BK
+BJC.BK
+CBG.BK
+OSP.BK
+MINT.BK
+CENTEL.BK
+AOT.BK
+AAV.BK
+
+# --- หุ้นไทย: กลุ่มโรงพยาบาล ---
+BDMS.BK
+BH.BK
+BCH.BK
+CHG.BK
+
+# --- หุ้นไทย: กลุ่มอสังหาฯ & นิคม ---
+WHA.BK
+AMATA.BK
+LH.BK
+SPALI.BK
+AP.BK
+AWC.BK
+CPN.BK
+
+# --- หุ้นไทย: กลุ่มรับเหมา & วัสดุก่อสร้าง ---
+SCC.BK
+SCGP.BK
+CK.BK
+STEC.BK
+
+# --- หุ้นจีน (US Listed) ---
+BABA
+PDD
+JD
+NIO
