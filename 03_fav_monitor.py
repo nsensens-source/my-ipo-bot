@@ -4,12 +4,20 @@ import pandas as pd
 import requests
 from supabase import create_client
 
-# --- CONFIG ---
+# --- ⚙️ CONFIGURATION ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK_FEVOURITE")
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
+
+# รับค่า TEST_MODE
+IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
+
+# เลือกตารางอัตโนมัติ
+TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
 def notify(msg):
-    requests.post(DISCORD_URL, json={"content": msg})
+    # เติม [TEST] ข้างหน้าถ้าอยู่ในโหมดทดสอบ
+    prefix = "🧪 [TEST] " if IS_TEST_MODE else ""
+    requests.post(DISCORD_URL, json={"content": prefix + msg})
 
 def calculate_rsi(data, window=14):
     delta = data.diff()
@@ -19,18 +27,19 @@ def calculate_rsi(data, window=14):
     return 100 - (100 / (1 + rs))
 
 def run_sniper_bot():
-    print("⭐ Starting Favourite Sniper Bot...")
+    mode_text = "🧪 TEST MODE (UAT Table)" if IS_TEST_MODE else "🟢 PROD MODE (Real Table)"
+    print(f"⭐ Starting Favourite Sniper Bot... [{mode_text}]")
     
-    # 1. ดึงเฉพาะหุ้น "ลูกรัก" (FAVOURITE)
+    # 1. ดึงข้อมูลจากตารางที่ถูกต้อง (TABLE_NAME)
     try:
-        res = supabase.table("ipo_trades").select("*").eq("market_type", "FAVOURITE").execute()
+        res = supabase.table(TABLE_NAME).select("*").eq("market_type", "FAVOURITE").execute()
         fav_stocks = res.data
     except Exception as e:
-        print(f"❌ Error fetching DB: {e}")
+        print(f"❌ Error fetching DB ({TABLE_NAME}): {e}")
         return
 
     if not fav_stocks:
-        print("⚠️ No Favourite stocks found in Database.")
+        print(f"⚠️ No Favourite stocks found in '{TABLE_NAME}'.")
         return
 
     print(f"🎯 Tracking {len(fav_stocks)} favourites...")
@@ -38,7 +47,7 @@ def run_sniper_bot():
     for item in fav_stocks:
         ticker = item['ticker']
         
-        # 2. ดึงกราฟย้อนหลัง 1 ปี (เพื่อคำนวณ SMA 200)
+        # 2. ดึงกราฟย้อนหลัง
         try:
             stock = yf.Ticker(ticker)
             df = stock.history(period="1y")
@@ -63,24 +72,20 @@ def run_sniper_bot():
             sma50_prev = df['SMA50'].iloc[-2]
             sma200_prev = df['SMA200'].iloc[-2]
 
-            # --- 4. SIGNALS (สัญญาณเข้าซื้อ) ---
-            
+            # --- 4. SIGNALS ---
             signals = []
             
-            # Signal A: RSI Oversold (ของถูก)
             if rsi_now < 30:
                 signals.append(f"📉 **RSI Oversold ({rsi_now:.2f})** - Buy the Dip!")
             
-            # Signal B: Golden Cross (SMA50 ตัดขึ้น SMA200)
             if sma50_prev < sma200_prev and sma50_now > sma200_now:
                 signals.append(f"🌟 **GOLDEN CROSS** - Bullish Trend Started!")
                 
-            # Signal C: Price Breakout 20 Days High (เบรคไฮเดือน)
-            high_20d = df['High'][-21:-1].max() # High ของ 20 วันก่อนหน้า (ไม่รวมวันนี้)
+            high_20d = df['High'][-21:-1].max()
             if close_price > high_20d:
                  signals.append(f"🚀 **Breakout 20-Day High** (Price > {high_20d:.2f})")
 
-            # ถ้าเจอสัญญาณใดสัญญาณหนึ่ง ให้แจ้งเตือนทันที!
+            # แจ้งเตือน
             if signals:
                 msg = f"⭐ **FAVOURITE ALERT: {ticker}** ⭐\n"
                 msg += f"Price: ${close_price:.2f}\n"
