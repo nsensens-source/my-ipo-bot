@@ -77,7 +77,7 @@ def run_monitor():
     market_health = get_market_sentiment()
     
     # 2. ดึงหุ้นในพอร์ต
-    res = supabase.table("ipo_trades").select("*").neq("status", "sold").execute()
+    res = supabase.table(TABLE_NAME).select("*").neq("status", "sold").execute()
     
     for item in res.data:
         ticker = item['ticker']
