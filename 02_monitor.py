@@ -3,9 +3,22 @@ import yfinance as yf
 from supabase import create_client
 import requests
 
-# --- CONFIG & SECRETS ---
+
+# --- ⚙️ CONFIG & ENVIRONMENT ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
+# รับค่า TEST_MODE (On/Off)
+IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
+
+# เลือกตารางอัตโนมัติ
+if IS_TEST_MODE:
+    TABLE_NAME = "ipo_trades_uat"
+    print(f"\n🧪 TEST MODE: ON -> Using table '{TABLE_NAME}'")
+else:
+    TABLE_NAME = "ipo_trades"
+    print(f"\n🟢 PROD MODE -> Using table '{TABLE_NAME}'")
+
+# -------------------------------
 
 # รับค่าจาก Secrets (ถ้าไม่ตั้งค่ามา จะถือว่าเป็น 'Off' โดยอัตโนมัติ)
 # แปลงเป็นตัวพิมพ์เล็กเพื่อให้ 'On', 'ON', 'on' ใช้ได้หมด
