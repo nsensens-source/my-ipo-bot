@@ -2,12 +2,12 @@ import os
 import pandas as pd
 import requests
 from supabase import create_client
+from io import StringIO  # <--- 1. เพิ่มบรรทัดนี้
 
 # --- ⚙️ CONFIG & ENVIRONMENT ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-# Headers
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
@@ -24,7 +24,6 @@ else:
     TABLE_NAME = "ipo_trades"
     print(f"\n🟢 PROD MODE -> Using table '{TABLE_NAME}'")
 
-# URL Repo ของคุณ
 REPO_BASE_URL = "https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main"
 
 # ---------------------------------------------------------
@@ -41,14 +40,16 @@ def get_external_sp500():
 def get_external_nasdaq100():
     print("💻 Fetching NASDAQ-100 from Wikipedia...")
     try:
-        dfs = pd.read_html('https://en.wikipedia.org/wiki/Nasdaq-100')
+        # <--- 2. แก้ตรงนี้ (กรณี Wikipedia)
+        response = requests.get('https://en.wikipedia.org/wiki/Nasdaq-100', headers=HEADERS)
+        dfs = pd.read_html(StringIO(response.text)) 
         for df in dfs:
             if 'Ticker' in df.columns:
                 return [{"ticker": s.strip(), "market_type": "NASDAQ_BASE"} for s in df['Ticker']]
     except: return []
 
 # ---------------------------------------------------------
-# 2. นักล่าหุ้นซิ่ง (แก้ไข Logic ตรงนี้ครับ) 🛠️
+# 2. นักล่าหุ้นซิ่ง (แก้ตรงนี้ด้วย)
 # ---------------------------------------------------------
 def get_market_movers():
     print("🚀 Scanning Market Movers (Smart Region Detection)...")
@@ -58,7 +59,6 @@ def get_market_movers():
         ("https://finance.yahoo.com/gainers", "AUTO_LONG_US"),
         ("https://finance.yahoo.com/losers", "AUTO_SHORT_US"),
         ("https://finance.yahoo.com/most-active", "AUTO_ACTIVE_US"),
-        # แม้จะดึงจากหน้าไทย แต่เราจะเช็ครายตัวว่าใช่ไทยจริงไหม
         ("https://finance.yahoo.com/most-active?region=TH", "AUTO_ACTIVE_TH"),
         ("https://finance.yahoo.com/gainers?region=TH", "AUTO_LONG_TH")
     ]
@@ -66,7 +66,10 @@ def get_market_movers():
     for url, default_m_type in targets:
         try:
             response = requests.get(url, headers=HEADERS)
-            dfs = pd.read_html(response.text)
+            
+            # <--- 3. แก้ตรงนี้ (หัวใจสำคัญที่ทำให้หาย Error)
+            dfs = pd.read_html(StringIO(response.text))
+            
             if not dfs: continue 
 
             df = dfs[0]
@@ -80,33 +83,21 @@ def get_market_movers():
                     break
             if not symbol_col: symbol_col = df.columns[0]
             
-            # ลูปดึงหุ้น 15 ตัวแรก (เผื่อตัวที่ผิดพลาด)
             for raw_symbol in df[symbol_col].head(15):
                 symbol_str = str(raw_symbol).strip()
                 
-                # 🛠️ FIXED LOGIC: แยกแยะสัญชาติหุ้นให้ถูกต้อง
-                
                 if ".BK" in symbol_str:
-                    # ถ้ามี .BK ติดมา -> หุ้นไทยแน่นอน
                     final_ticker = symbol_str
-                    final_m_type = "AUTO_ACTIVE_TH" # บังคับเป็นไทย
-                    
+                    final_m_type = "AUTO_ACTIVE_TH"
                 elif ".F" in symbol_str:
-                    # หุ้น Foreign Board ของไทย -> ข้ามไปก่อน (เล่นยาก)
                     continue
-                    
                 else:
-                    # ถ้าไม่มี .BK (เช่น NVDA, AMZN) -> ถือเป็นหุ้น US ทั้งหมด
-                    # แม้จะเจอในหน้าเว็บไทย ก็ต้องปฏิบัติเหมือนหุ้น US
                     final_ticker = symbol_str
-                    
-                    # ถ้า URL ต้นทางเป็น TH ให้เปลี่ยน Type เป็น US เพราะมันคือหุ้นนอกที่คนไทยนิยม
                     if "_TH" in default_m_type:
                         final_m_type = "AUTO_ACTIVE_US"
                     else:
                         final_m_type = default_m_type
 
-                # กรองพวก Index หรือตัวแปลกๆ ออก
                 if "^" in final_ticker or "USD" in final_ticker:
                     continue
 
@@ -138,7 +129,7 @@ def get_user_manual_list(filename, type_name):
 # MAIN
 # ---------------------------------------------------------
 def main():
-    print("🤖 Starting Smart Scraper (Fixed Region Bug)...")
+    print("🤖 Starting Smart Scraper (Clean Log)...")
     
     base_data = get_external_sp500() + get_external_nasdaq100()
     hunter_data = get_market_movers()
