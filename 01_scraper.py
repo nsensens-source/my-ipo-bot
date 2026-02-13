@@ -7,19 +7,16 @@ from supabase import create_client
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-# Headers จำเป็นมาก เพื่อไม่ให้ Yahoo/Wiki บล็อก
+# Headers
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 
 if GITHUB_TOKEN:
-    # เพิ่มบรรทัดนี้เพื่อให้เข้าถึง Private Repo ได้
     HEADERS["Authorization"] = f"token {GITHUB_TOKEN}"
     
-# รับค่า TEST_MODE (On/Off)
 IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 
-# เลือกตารางอัตโนมัติ
 if IS_TEST_MODE:
     TABLE_NAME = "ipo_trades_uat"
     print(f"\n🧪 TEST MODE: ON -> Using table '{TABLE_NAME}'")
@@ -27,15 +24,13 @@ else:
     TABLE_NAME = "ipo_trades"
     print(f"\n🟢 PROD MODE -> Using table '{TABLE_NAME}'")
 
-# 👇 แก้ไขตรงนี้: ใส่ตัวแปร REPO_BASE_URL ให้ถูกต้อง
+# URL Repo ของคุณ
 REPO_BASE_URL = "https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main"
 
 # ---------------------------------------------------------
-# 1. ฐานข้อมูลตลาดหลัก (External Sources Only)
+# 1. ฐานข้อมูลตลาดหลัก
 # ---------------------------------------------------------
-
 def get_external_sp500():
-    """ดึง S&P 500 จาก GitHub CSV (ไม่ใช่ Hardcode)"""
     print("🇺🇸 Fetching S&P 500 from External CSV...")
     try:
         url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
@@ -44,7 +39,6 @@ def get_external_sp500():
     except: return []
 
 def get_external_nasdaq100():
-    """ดึง NASDAQ-100 จาก Wikipedia (Dynamic Parsing)"""
     print("💻 Fetching NASDAQ-100 from Wikipedia...")
     try:
         dfs = pd.read_html('https://en.wikipedia.org/wiki/Nasdaq-100')
@@ -54,118 +48,107 @@ def get_external_nasdaq100():
     except: return []
 
 # ---------------------------------------------------------
-# 2. นักล่าหุ้นซิ่ง (Dynamic Hunters - Yahoo Finance)
+# 2. นักล่าหุ้นซิ่ง (แก้ไข Logic ตรงนี้ครับ) 🛠️
 # ---------------------------------------------------------
-
 def get_market_movers():
-    """
-    ดึงหุ้นซิ่ง (Gainers/Losers/Active) จาก Yahoo Finance
-    โดยแยกตาม Region (US และ TH) แบบอัตโนมัติ
-    """
-    print("🚀 Scanning Market Movers (US & Thai)...")
+    print("🚀 Scanning Market Movers (Smart Region Detection)...")
     tickers = []
     
-    # รายการ URL ที่จะไปดูดข้อมูล (ไม่ต้องพิมพ์ชื่อหุ้นเอง)
     targets = [
-        # ตลาด US
         ("https://finance.yahoo.com/gainers", "AUTO_LONG_US"),
         ("https://finance.yahoo.com/losers", "AUTO_SHORT_US"),
         ("https://finance.yahoo.com/most-active", "AUTO_ACTIVE_US"),
-        # ตลาดไทย (ใช้ region=TH เพื่อดึงหุ้นไทยอัตโนมัติ)
+        # แม้จะดึงจากหน้าไทย แต่เราจะเช็ครายตัวว่าใช่ไทยจริงไหม
         ("https://finance.yahoo.com/most-active?region=TH", "AUTO_ACTIVE_TH"),
         ("https://finance.yahoo.com/gainers?region=TH", "AUTO_LONG_TH")
     ]
     
-    for url, m_type in targets:
+    for url, default_m_type in targets:
         try:
             response = requests.get(url, headers=HEADERS)
             dfs = pd.read_html(response.text)
-            
-            if not dfs: continue # ถ้าไม่เจอตาราง ข้าม
+            if not dfs: continue 
 
-            df = dfs[0] # เอาตารางแรกเสมอ
+            df = dfs[0]
             
-            # หาชื่อ column ที่เก็บ Symbol (บางที Yahoo เปลี่ยนชื่อไปมา)
+            # หา Column Symbol
             symbol_col = None
             possible_names = ['Symbol', 'Ticker', 'ชื่อย่อ', 'สัญลักษณ์']
-            
             for col in df.columns:
                 if col in possible_names:
                     symbol_col = col
                     break
+            if not symbol_col: symbol_col = df.columns[0]
             
-            if not symbol_col:
-                # ถ้าหาไม่เจอจริงๆ ลองเดาว่าเป็น Column แรก
-                symbol_col = df.columns[0]
-            
-            # ดึง 10 ตัวแรกของแต่ละหมวด
-            for symbol in df[symbol_col].head(10):
-                clean_sym = str(symbol).split('.')[0] # ตัดนามสกุลออกก่อน
+            # ลูปดึงหุ้น 15 ตัวแรก (เผื่อตัวที่ผิดพลาด)
+            for raw_symbol in df[symbol_col].head(15):
+                symbol_str = str(raw_symbol).strip()
                 
-                # ถ้าเป็นโหมดไทย ต้องเติม .BK กลับเข้าไปเพื่อให้ yfinance อ่านออก
-                if "_TH" in m_type and ".BK" not in str(symbol):
-                    final_ticker = f"{clean_sym}.BK"
-                elif "_TH" in m_type and ".BK" in str(symbol):
-                    final_ticker = symbol 
+                # 🛠️ FIXED LOGIC: แยกแยะสัญชาติหุ้นให้ถูกต้อง
+                
+                if ".BK" in symbol_str:
+                    # ถ้ามี .BK ติดมา -> หุ้นไทยแน่นอน
+                    final_ticker = symbol_str
+                    final_m_type = "AUTO_ACTIVE_TH" # บังคับเป็นไทย
+                    
+                elif ".F" in symbol_str:
+                    # หุ้น Foreign Board ของไทย -> ข้ามไปก่อน (เล่นยาก)
+                    continue
+                    
                 else:
-                    final_ticker = clean_sym # ตลาด US ไม่ต้องมีนามสกุล
+                    # ถ้าไม่มี .BK (เช่น NVDA, AMZN) -> ถือเป็นหุ้น US ทั้งหมด
+                    # แม้จะเจอในหน้าเว็บไทย ก็ต้องปฏิบัติเหมือนหุ้น US
+                    final_ticker = symbol_str
+                    
+                    # ถ้า URL ต้นทางเป็น TH ให้เปลี่ยน Type เป็น US เพราะมันคือหุ้นนอกที่คนไทยนิยม
+                    if "_TH" in default_m_type:
+                        final_m_type = "AUTO_ACTIVE_US"
+                    else:
+                        final_m_type = default_m_type
 
-                tickers.append({"ticker": final_ticker, "market_type": m_type})
+                # กรองพวก Index หรือตัวแปลกๆ ออก
+                if "^" in final_ticker or "USD" in final_ticker:
+                    continue
+
+                tickers.append({"ticker": final_ticker, "market_type": final_m_type})
                 
-        except Exception as e:
-            # print(f"   ⚠️ Error scraping {url}: {e}") # ปิด error เล็กน้อยเพื่อความสะอาด
+        except Exception:
             pass
         
     return tickers
 
 # ---------------------------------------------------------
-# 3. หุ้นที่คุณเลือกเอง (Manual Control via GitHub)
+# 3. User Manual (GitHub)
 # ---------------------------------------------------------
-
 def get_user_manual_list(filename, type_name):
     print(f"🌕 Fetching '{filename}' from User GitHub...")
     tickers = []
     try:
-        # ต่อ URL ให้ถูกต้อง
         url = f"{REPO_BASE_URL}/{filename}"
-        
-        # ส่ง HEADERS ที่มี Token ไปด้วย
         response = requests.get(url, headers=HEADERS)
-        
         if response.status_code == 200:
             lines = response.text.splitlines()
             clean_lines = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
             tickers = [{"ticker": t, "market_type": type_name} for t in clean_lines]
             print(f"   ✅ Found {len(tickers)} items in {filename}")
-        else:
-            print(f"   ⚠️ Failed to fetch {filename} (Status: {response.status_code})")
-            print(f"      URL: {url}")
-    except Exception as e: 
-        print(f"   ❌ Error: {e}")
-        pass
+    except: pass
     return tickers
 
 # ---------------------------------------------------------
-# MAIN EXECUTION
+# MAIN
 # ---------------------------------------------------------
 def main():
-    print("🤖 Starting Zero-Hardcode Scraper...")
+    print("🤖 Starting Smart Scraper (Fixed Region Bug)...")
     
-    # 1. External Base (CSV/Wiki)
     base_data = get_external_sp500() + get_external_nasdaq100()
-    
-    # 2. Auto Hunters (Yahoo Live)
     hunter_data = get_market_movers()
-    
-    # 3. User Manual (GitHub Files)
-    # ใส่ชื่อไฟล์ให้ตรงกับใน GitHub ของคุณ
     manual_data = get_user_manual_list("moonshots.txt", "MOONSHOT") + \
                   get_user_manual_list("favourites.txt", "FAVOURITE")
     
     all_data = base_data + hunter_data + manual_data
     
     if not all_data:
-        print("⚠️ No data found! Check network or URLs.")
+        print("⚠️ No data found!")
         return
 
     print(f"\n💾 Syncing {len(all_data)} tickers to Supabase...")
@@ -173,7 +156,6 @@ def main():
     count = 0
     for item in all_data:
         try:
-            # Upsert ลง DB
             supabase.table(TABLE_NAME).upsert({
                 "ticker": item['ticker'],
                 "market_type": item['market_type'],
@@ -184,9 +166,6 @@ def main():
         except: pass
 
     print(f"✅ SUCCESS: Synced {count} tickers.")
-    print(f"   - External Base: {len(base_data)}")
-    print(f"   - Auto Hunters: {len(hunter_data)}")
-    print(f"   - User Manual: {len(manual_data)}")
 
 if __name__ == "__main__":
     main()
