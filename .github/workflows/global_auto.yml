@@ -2,10 +2,10 @@ name: Global Trading Bot (Main System)
 
 on:
   schedule:
-    - cron: '15 3 * * *'   # 10:15 น. ไทย (เช็คหุ้นไทยเปิด)
-    - cron: '45 9 * * *'   # 16:45 น. ไทย (สรุปหุ้นไทยปิด)
-    - cron: '15 15 * * *'  # 22:15 น. ไทย (เช็คหุ้น US เปิด)
-    - cron: '15 21 * * *'  # 04:15 น. ไทย (สรุปหุ้น US ปิด)
+    - cron: '15 3 * * *'   # 10:15 น. ไทย
+    - cron: '45 9 * * *'   # 16:45 น. ไทย
+    - cron: '15 15 * * *'  # 22:15 น. ไทย
+    - cron: '15 21 * * *'  # 04:15 น. ไทย
   workflow_dispatch:
 
 jobs:
@@ -16,23 +16,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      
       - name: Install Dependencies
         run: |
           pip install requests playwright yfinance supabase pandas lxml
           playwright install chromium
-      -- name: Execute System
+
+      - name: Execute System
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          # 👇 เพิ่มบรรทัดนี้ครับ
           TEST_MODE: ${{ secrets.TEST_MODE }}
         run: |
           python 01_scraper.py
           python 02_monitor.py
-        run: |
-          python 01_scraper.py
-          python 02_monitor.py
+          
+          # เช็คเวลาเพื่อส่งสรุปยอด (เฉพาะรอบ 16:45 และ 04:15 ไทย)
           HOUR=$(date +%H)
           if [ "$HOUR" == "09" ] || [ "$HOUR" == "21" ]; then
             python -c "from 02_monitor import daily_summary; daily_summary()"
