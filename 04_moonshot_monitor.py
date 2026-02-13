@@ -6,7 +6,7 @@ from supabase import create_client
 
 # --- CONFIG ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK_FEVOURITE")
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK_MOONSHOT")
 
 # เกณฑ์ความแรง (ปรับได้)
 PRICE_JUMP_THRESHOLD = 5.0  # ราคาบวกเกิน 5%
