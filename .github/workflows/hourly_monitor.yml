@@ -1,0 +1,42 @@
+name: Hourly Monitor & Trade System
+
+on:
+  schedule:
+    # รันทุกชั่วโมง (นาทีที่ 0)
+    - cron: '0 * * * *'
+  workflow_dispatch: # ปุ่มสำหรับกดรันเอง (Manual Run)
+
+jobs:
+  monitor_and_trade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install pandas requests supabase yfinance
+
+      # Step 1: ให้ Monitor หาหุ้นและเปลี่ยนสถานะเป็น signal_buy/signal_sell
+      - name: 1. Run Monitor (Signal Scanner)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TEST_MODE: ${{ secrets.TEST_MODE }}
+        run: python 02_monitor.py
+
+      # Step 2: ให้ Trader เข้ามาเช็คราคาจริงและบันทึก Transaction
+      - name: 2. Run Trader (Execution Bot)
+        if: always() # ให้รันเสมอต่อให้ Monitor จบการทำงาน (แต่ถ้า Monitor Error หนักๆ อาจจะไม่รัน)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          TEST_MODE: ${{ secrets.TEST_MODE }}
+        run: python 06_trader.py
