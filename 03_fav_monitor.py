@@ -6,7 +6,7 @@ from supabase import create_client
 
 # --- CONFIG ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK_FEVOURITE")
 
 def notify(msg):
     requests.post(DISCORD_URL, json={"content": msg})
