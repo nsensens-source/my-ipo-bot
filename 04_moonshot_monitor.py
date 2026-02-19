@@ -6,7 +6,7 @@ from supabase import create_client
 
 # --- ⚙️ CONFIGURATION ---
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK_MOONSHOT")
 
 # รับค่า TEST_MODE
 IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
