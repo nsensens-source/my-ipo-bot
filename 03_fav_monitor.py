@@ -15,9 +15,18 @@ IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
 def notify(msg):
-    # เติม [TEST] ข้างหน้าถ้าอยู่ในโหมดทดสอบ
+    # ป้องกัน Error กรณีลืมใส่ Webhook
+    if not DISCORD_URL:
+        print(f"⚠️ [MISSED ALERT] พบสัญญาณแต่ส่งไม่ได้ (ไม่มี Webhook): {msg}")
+        return
+
     prefix = "🧪 [TEST] " if IS_TEST_MODE else ""
-    requests.post(DISCORD_URL, json={"content": prefix + msg})
+    try:
+        response = requests.post(DISCORD_URL, json={"content": prefix + msg})
+        if response.status_code not in [200, 204]:
+             print(f"❌ Discord Error {response.status_code}: {response.text}")
+    except Exception as e:
+        print(f"❌ Connection Error: {e}")
 
 def calculate_rsi(data, window=14):
     delta = data.diff()
