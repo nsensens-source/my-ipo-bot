@@ -106,6 +106,13 @@ def run_monitor():
 
             # Case 1: เฝ้าซื้อ (WATCHING -> SIGNAL_BUY)
             if status == 'watching':
+                
+                # --- 🧹 ระบบทำความสะอาด: ล้างราคาที่ค้างจากรอบเทรดก่อนหน้า ---
+                if float(item.get('buy_price') or 0) > 0:
+                    update_payload['buy_price'] = 0
+                    update_payload['highest_price'] = 0
+                # --------------------------------------------------------
+
                 # 1.1 Breakout Strategy (Long/Base/Moonshot)
                 if any(x in m_type for x in ['LONG', 'BASE', 'MOONSHOT', 'FAVOURITE']):
                     if base_high > 0 and current_price > base_high:
