@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import requests
+import yfinance as yf  # เพิ่ม yfinance สำหรับดึงราคาหุ้นไทย
 from supabase import create_client
 from io import StringIO
 
@@ -26,7 +27,7 @@ else:
 REPO_BASE_URL = "https://raw.githubusercontent.com/nsensens-source/my-ipo-bot/main"
 
 # ---------------------------------------------------------
-# 1. ฐานข้อมูลตลาดหลัก (เก็บไว้เป็นฐานข้อมูลอ้างอิง)
+# 1. ฐานข้อมูลตลาดหลัก
 # ---------------------------------------------------------
 def get_external_sp500():
     print("🇺🇸 Fetching S&P 500 (Base)...")
@@ -54,85 +55,83 @@ def get_external_thai_set100():
     except: return []
 
 # ---------------------------------------------------------
-# 2. นักล่าหุ้นซิ่ง (สูตรใหม่: 50 US / 40 TH) ⚖️
+# 2. นักล่าหุ้นซิ่ง US (กวาดจากเว็บ)
 # ---------------------------------------------------------
-def get_market_movers():
-    print("🚀 Scanning Market Movers (Balanced Strategy)...")
+def get_us_market_movers():
+    print("🚀 Scanning US Market Movers...")
     tickers = []
-    
-    # กำหนดเป้าหมายและจำนวนที่จะดึง (Limit)
     targets = [
-        # --- 🇺🇸 US MARKET (Total 50) ---
-        # 1. US Gainers (25 ตัว) -> ขาขึ้น
         ("https://finance.yahoo.com/gainers", "AUTO_LONG_US", 25),
-        # 2. US Losers (25 ตัว) -> ขาลง (Short/Rebound)
-        ("https://finance.yahoo.com/losers", "AUTO_SHORT_US", 25),
-        
-        # --- 🇹🇭 THAI MARKET (Total 40) ---
-        # 3. TH Gainers (20 ตัว) -> ขาขึ้น
-        ("https://finance.yahoo.com/gainers?region=TH", "AUTO_LONG_TH", 20),
-        # 4. TH Losers (20 ตัว) -> ขาลง
-        ("https://finance.yahoo.com/losers?region=TH", "AUTO_SHORT_TH", 20)
+        ("https://finance.yahoo.com/losers", "AUTO_SHORT_US", 25)
     ]
-    
     for url, m_type, limit in targets:
-        print(f"   👉 Scraping {m_type} (Limit: {limit})...")
+        print(f"   👉 Scraping {m_type}...")
         try:
             response = requests.get(url, headers=HEADERS)
             dfs = pd.read_html(StringIO(response.text))
             if not dfs: continue 
 
             df = dfs[0]
+            symbol_col = next((col for col in df.columns if col in ['Symbol', 'Ticker', 'ชื่อย่อ']), df.columns[0])
             
-            # หา Column ชื่อหุ้น
-            symbol_col = None
-            possible_names = ['Symbol', 'Ticker', 'ชื่อย่อ', 'สัญลักษณ์']
-            for col in df.columns:
-                if col in possible_names:
-                    symbol_col = col
-                    break
-            if not symbol_col: symbol_col = df.columns[0]
-            
-            # วนลูปตามจำนวน Limit ที่ตั้งไว้ (25 หรือ 20)
-            count_found = 0
+            count = 0
             for raw_symbol in df[symbol_col]:
-                if count_found >= limit: break # ครบจำนวนแล้วหยุด
-                
-                symbol_str = str(raw_symbol).strip()
-                
-                # --- LOGIC แยกสัญชาติ ---
-                
-                # ถ้าเป็นโหมดไทย (URL มี region=TH)
-                if "_TH" in m_type:
-                    # ต้องมี .BK (ถ้าไม่มีเติมให้)
-                    if ".BK" not in symbol_str:
-                        final_ticker = f"{symbol_str}.BK"
-                    else:
-                        final_ticker = symbol_str
-                    
-                    # กรองหุ้นต่างด้าว (.F) หรือ Warrant (.W) ที่ไม่อยากเล่น
-                    if ".F.BK" in final_ticker: continue 
-                    
-                # ถ้าเป็นโหมด US
-                else:
-                    final_ticker = symbol_str
-                    # ถ้าชื่อมี .BK หลุดมาในโหมด US (เป็นไปได้ยากแต่กันไว้) ให้ข้าม
-                    if ".BK" in final_ticker: continue
-
-                # กรองขยะทั่วไป
-                if "^" in final_ticker or "USD" in final_ticker: continue
-
+                if count >= limit: break
+                final_ticker = str(raw_symbol).strip()
+                if ".BK" in final_ticker or "^" in final_ticker or "USD" in final_ticker: continue
                 tickers.append({"ticker": final_ticker, "market_type": m_type})
-                count_found += 1
-                
+                count += 1
         except Exception as e:
-            print(f"      ⚠️ Error: {e}")
-            pass
-        
+            print(f"      ⚠️ Error US: {e}")
     return tickers
 
 # ---------------------------------------------------------
-# 3. User Manual
+# 3. นักล่าหุ้นซิ่ง TH (คำนวณเองจาก SET100 แบบแม่นยำ) ⚖️
+# ---------------------------------------------------------
+def get_thai_market_movers(limit=20):
+    print("🇹🇭 Scanning Thai Market Movers (Self-Calculated from SET100)...")
+    tickers_data = []
+    try:
+        # ใช้รายชื่อจาก SET100 ที่เรามี
+        set100_list = [item['ticker'] for item in get_external_thai_set100()]
+        if not set100_list: return []
+
+        print(f"   👉 Downloading data for {len(set100_list)} Thai stocks...")
+        # โหลดราคาล่าสุดรวดเดียวเพื่อความไว
+        data = yf.download(set100_list, period="5d", progress=False)
+        
+        if 'Close' in data:
+            close_data = data['Close']
+            for ticker in set100_list:
+                if ticker in close_data.columns:
+                    col = close_data[ticker].dropna()
+                    if len(col) >= 2:
+                        prev_price = float(col.iloc[-2])
+                        curr_price = float(col.iloc[-1])
+                        if prev_price > 0:
+                            pct = ((curr_price - prev_price) / prev_price) * 100
+                            tickers_data.append({"ticker": ticker, "pct_change": pct})
+                            
+        # จัดเรียงหาตัวท็อป
+        tickers_data.sort(key=lambda x: x['pct_change'], reverse=True)
+        results = []
+        
+        # 20 อันดับแรก (บวกเยอะสุด) -> AUTO_LONG_TH
+        for item in tickers_data[:limit]:
+            results.append({"ticker": item["ticker"], "market_type": "AUTO_LONG_TH"})
+            
+        # 20 อันดับสุดท้าย (ลบเยอะสุด) -> AUTO_SHORT_TH
+        for item in tickers_data[-limit:]:
+            results.append({"ticker": item["ticker"], "market_type": "AUTO_SHORT_TH"})
+            
+        print(f"   ✅ Found {limit} Thai Gainers and {limit} Thai Losers.")
+        return results
+    except Exception as e:
+        print(f"      ⚠️ Error Thai Movers: {e}")
+        return []
+
+# ---------------------------------------------------------
+# 4. User Manual
 # ---------------------------------------------------------
 def get_user_manual_list(filename, type_name):
     print(f"🌕 Fetching '{filename}' from User GitHub...")
@@ -154,13 +153,13 @@ def get_user_manual_list(filename, type_name):
 def main():
     print("🤖 Starting Balanced Scraper...")
     
-    # 1. Base (เก็บไว้ดูภาพรวม)
+    # 1. Base Market
     base_data = get_external_sp500() + get_external_thai_set100()
     
-    # 2. Hunters (พระเอกของเรา: 90 ตัว)
-    hunter_data = get_market_movers()
+    # 2. Hunters (US + TH)
+    hunter_data = get_us_market_movers() + get_thai_market_movers(limit=20)
     
-    # 3. Manual
+    # 3. Manual Lists
     manual_data = get_user_manual_list("moonshots.txt", "MOONSHOT") + \
                   get_user_manual_list("favourites.txt", "FAVOURITE")
     
@@ -185,9 +184,6 @@ def main():
         except: pass
 
     print(f"✅ SUCCESS: Synced {count} tickers.")
-    print(f"   - Base Markets: {len(base_data)}")
-    print(f"   - Hunters (Active): {len(hunter_data)}")
-    print(f"   - User Manual: {len(manual_data)}")
 
 if __name__ == "__main__":
     main()
