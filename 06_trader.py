@@ -10,7 +10,7 @@ import pandas as pd
 print("💰 [TRADER] Wake up & Initializing...")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK_TRADER")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
