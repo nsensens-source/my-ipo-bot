@@ -150,29 +150,38 @@ def get_user_manual_list(filename, type_name):
 # ---------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------
 def main():
     print("🤖 Starting Balanced Scraper...")
     
-    # 1. Base Market
     base_data = get_external_sp500() + get_external_thai_set100()
-    
-    # 2. Hunters (US + TH)
     hunter_data = get_us_market_movers() + get_thai_market_movers(limit=20)
-    
-    # 3. Manual Lists
     manual_data = get_user_manual_list("moonshots.txt", "MOONSHOT") + \
                   get_user_manual_list("favourites.txt", "FAVOURITE")
     
     all_data = base_data + hunter_data + manual_data
     
-    if not all_data:
+    # --- 🛡️ ระบบกรองหุ้นซ้ำ (Deduplication) ---
+    unique_data = {}
+    for item in all_data:
+        # ถ้ารายชื่อซ้ำ มันจะถูกเขียนทับด้วยข้อมูลล่าสุดเสมอ 
+        # (เช่น ถ้าเจอใน SET100 แล้วมาเจอใน FAVOURITE อีก จะนับเป็น FAVOURITE)
+        unique_data[item['ticker']] = item
+    
+    # แปลงกลับเป็น List เพื่อเตรียมนำไปใช้งาน
+    final_clean_data = list(unique_data.values())
+    # -----------------------------------------
+
+    if not final_clean_data:
         print("⚠️ No data found!")
         return
 
-    print(f"\n💾 Syncing {len(all_data)} tickers to Supabase...")
+    print(f"\n💾 Syncing {len(final_clean_data)} unique tickers to Supabase...")
     
     count = 0
-    for item in all_data:
+    for item in final_clean_data:
         try:
             supabase.table(TABLE_NAME).upsert({
                 "ticker": item['ticker'],
@@ -183,7 +192,7 @@ def main():
             if count % 100 == 0: print(f"   ...synced {count}")
         except: pass
 
-    print(f"✅ SUCCESS: Synced {count} tickers.")
+    print(f"✅ SUCCESS: Synced {count} unique tickers.")
 
 if __name__ == "__main__":
     main()
