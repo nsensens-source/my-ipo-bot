@@ -114,18 +114,20 @@ def run_monitor():
                 if any(x in m_type for x in ['LONG', 'BASE', 'MOONSHOT', 'FAVOURITE']):
                     if base_high > 0 and current_price > base_high:
                         
-                        # 1. คำนวณเปอร์เซ็นต์ที่ราคาทะลุ Base ขึ้นมา
                         increase_pct = ((current_price - base_high) / base_high) * 100
                         
-                        # 2. กำหนด Status ความแรงของ Breakout (ปรับตัวเลข % ได้ตามต้องการ)
+                        # --- 🎨 ระบบสี ANSI (เขียว / เหลือง / ฟ้า) ---
                         if increase_pct >= 3.0:
-                            strength_status = "🔥 High"    # ทะลุแรงมาก (> 3%)
+                            strength_status = "\x1b[1;32m🔥 High\x1b[0m"    # สีเขียว
                         elif increase_pct >= 1.0:
-                            strength_status = "⚡ Medium" # ทะลุปานกลาง (1% - 3%)
+                            strength_status = "\x1b[1;33m⚡ Medium\x1b[0m" # สีเหลือง
                         else:
-                            strength_status = "🟢 Low"    # เพิ่งเริ่มทะลุ (< 1%)
+                            strength_status = "\x1b[1;36m🟢 Low\x1b[0m"    # สีฟ้า
 
                         update_payload['status'] = 'signal_buy'
+                        
+                        # ประกอบข้อความใส่ในกล่อง ```ansi
+                        alert_msg = f"
                         
                         # 3. สร้างข้อความส่งเข้า Discord แบบใหม่
                         alert_msg = f"🚀 **BREAKOUT**: {ticker} Price {current_price:.2f} > Base {base_high:.2f} | 📈 +{increase_pct:.2f}% [{strength_status}]"
