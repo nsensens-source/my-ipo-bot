@@ -18,9 +18,16 @@ IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
 def notify(msg):
-    prefix = "🔭 [MONITOR] " if IS_TEST_MODE else "📡 [SIGNAL]\n"
+    prefix = "🔭 [MONITOR] " if IS_TEST_MODE else "📡 [SIGNAL] "
+    
+    # ถ้าระบบตรวจพบว่าข้อความเป็นกล่องสี (```ansi) ให้ดึงคำว่า MONITOR เข้าไปไว้ข้างในบรรทัดเดียวกัน
+    if msg.startswith("```ansi"):
+        final_msg = msg.replace("```ansi\n", f"```ansi\n{prefix}")
+    else:
+        final_msg = prefix + msg
+        
     try:
-        requests.post(DISCORD_URL, json={"content": prefix + msg})
+        requests.post(DISCORD_URL, json={"content": final_msg})
     except: pass
 
 def calculate_rsi(data, window=14):
