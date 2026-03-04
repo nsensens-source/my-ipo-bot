@@ -18,7 +18,7 @@ IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
 def notify(msg):
-    prefix = "🔭 [MONITOR] " if IS_TEST_MODE else "📡 [SIGNAL] "
+    prefix = "🔭 [MONITOR] " if IS_TEST_MODE else "📡 [SIGNAL]\n"
     try:
         requests.post(DISCORD_URL, json={"content": prefix + msg})
     except: pass
@@ -110,7 +110,7 @@ def run_monitor():
                     update_payload['highest_price'] = 0
                 # --------------------------------------
 
-                # 1.1 Breakout Strategy (Long/Base/Moonshot)
+               # 1.1 Breakout Strategy (Long/Base/Moonshot)
                 if any(x in m_type for x in ['LONG', 'BASE', 'MOONSHOT', 'FAVOURITE']):
                     if base_high > 0 and current_price > base_high:
                         
@@ -126,9 +126,11 @@ def run_monitor():
 
                         update_payload['status'] = 'signal_buy'
                         
-                        
-                        # 3. สร้างข้อความส่งเข้า Discord แบบใหม่
-                        alert_msg = f"🚀 **BREAKOUT**: {ticker} Price {current_price:.2f} > Base {base_high:.2f} | 📈 +{increase_pct:.2f}% [{strength_status}]"
+                        # 3. สร้างข้อความส่งเข้า Discord
+                        # ใช้ f""" (ฟันหนู 3 ตัว) เพื่อให้ครอบข้อความที่มีสัญลักษณ์พิเศษได้ง่าย
+                        alert_msg = f"""```ansi
+🚀 BREAKOUT: {ticker} Price {current_price:.2f} > Base {base_high:.2f} | 📈 +{increase_pct:.2f}% [{strength_status}]
+```"""
                         notify(alert_msg)
                         
                         signal_triggered = True
