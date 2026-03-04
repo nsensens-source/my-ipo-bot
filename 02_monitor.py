@@ -126,8 +126,6 @@ def run_monitor():
 
                         update_payload['status'] = 'signal_buy'
                         
-                        # ประกอบข้อความใส่ในกล่อง ```ansi
-                        alert_msg = f"
                         
                         # 3. สร้างข้อความส่งเข้า Discord แบบใหม่
                         alert_msg = f"🚀 **BREAKOUT**: {ticker} Price {current_price:.2f} > Base {base_high:.2f} | 📈 +{increase_pct:.2f}% [{strength_status}]"
