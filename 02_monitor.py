@@ -110,10 +110,27 @@ def run_monitor():
                     update_payload['highest_price'] = 0
                 # --------------------------------------
 
+                # 1.1 Breakout Strategy (Long/Base/Moonshot)
                 if any(x in m_type for x in ['LONG', 'BASE', 'MOONSHOT', 'FAVOURITE']):
                     if base_high > 0 and current_price > base_high:
+                        
+                        # 1. คำนวณเปอร์เซ็นต์ที่ราคาทะลุ Base ขึ้นมา
+                        increase_pct = ((current_price - base_high) / base_high) * 100
+                        
+                        # 2. กำหนด Status ความแรงของ Breakout (ปรับตัวเลข % ได้ตามต้องการ)
+                        if increase_pct >= 3.0:
+                            strength_status = "🔥 High"    # ทะลุแรงมาก (> 3%)
+                        elif increase_pct >= 1.0:
+                            strength_status = "⚡ Medium" # ทะลุปานกลาง (1% - 3%)
+                        else:
+                            strength_status = "🟢 Low"    # เพิ่งเริ่มทะลุ (< 1%)
+
                         update_payload['status'] = 'signal_buy'
-                        notify(f"🚀 **BREAKOUT FOUND**: {ticker} Price {current_price:.2f} > Base {base_high:.2f}")
+                        
+                        # 3. สร้างข้อความส่งเข้า Discord แบบใหม่
+                        alert_msg = f"🚀 **BREAKOUT**: {ticker} Price {current_price:.2f} > Base {base_high:.2f} | 📈 +{increase_pct:.2f}% [{strength_status}]"
+                        notify(alert_msg)
+                        
                         signal_triggered = True
 
                 elif 'SHORT' in m_type:
