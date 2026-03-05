@@ -144,7 +144,8 @@ def run_monitor():
 
         try:
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="2d")
+            # 🚀 OPTIMIZATION: ดึงข้อมูล 1 ปีแบบม้วนเดียวจบ เพื่อเอามาหาทั้ง ราคาปัจจุบัน, RSI และ Rolling High
+            hist = stock.history(period="1y")
             
             if hist.empty:
                 print("❌ No price data (Delisted or Not Found) -> 🗑️ Auto-Deleting...")
@@ -154,20 +155,23 @@ def run_monitor():
                 continue
             
             current_price = float(hist['Close'].iloc[-1])
-            full_hist = stock.history(period="1mo")
-            rsi_val = calculate_rsi(full_hist['Close'])
+            rsi_val = calculate_rsi(hist['Close'])
             
+            # --- 🚀 ROLLING HIGH LOGIC (อัปเดต Base ใหม่เสมอ) ---
+            # หาจุดสูงสุดในรอบ 1 ปี (ไม่รวมแถวสุดท้าย/วันนี้ เพื่อดูว่าวันนี้ทะลุของวันก่อนๆ ไหม)
+            if len(hist) > 1:
+                base_high = float(hist['High'].iloc[:-1].max())
+            else:
+                base_high = float(hist['High'].max())
+            
+            # อัปเดตข้อมูลขึ้น Database
+            highest_price_db = float(item.get('highest_price') or 0)
             update_payload = {
                 "last_price": current_price,
+                "base_high": base_high, # เซฟค่า Rolling High ใหม่ทุกครั้ง
+                "highest_price": max(current_price, highest_price_db),
                 "last_update": datetime.datetime.now().isoformat()
             }
-            
-            base_high = float(item.get('base_high') or 0)
-            if base_high == 0:
-                y_hist = stock.history(period="1y")
-                base_high = float(y_hist['High'].max()) if not y_hist.empty else current_price
-                update_payload['base_high'] = base_high
-                update_payload['highest_price'] = current_price
 
             is_thai = '.BK' in ticker
             tp_pct = 0.05 if is_thai else 0.10  
