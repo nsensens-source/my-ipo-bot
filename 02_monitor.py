@@ -157,9 +157,12 @@ def run_monitor():
             current_price = float(hist['Close'].iloc[-1])
             rsi_val = calculate_rsi(hist['Close'])
             
-            # --- 🚀 ROLLING HIGH LOGIC (อัปเดต Base ใหม่เสมอ) ---
-            # หาจุดสูงสุดในรอบ 1 ปี (ไม่รวมแถวสุดท้าย/วันนี้ เพื่อดูว่าวันนี้ทะลุของวันก่อนๆ ไหม)
-            if len(hist) > 1:
+            # --- 🚀 LAGGED ROLLING HIGH LOGIC (อัปเดต Base ใหม่เสมอ แต่หน่วงเวลา 5 วัน) ---
+            # หาจุดสูงสุดในรอบ 1 ปี โดยตัด 5 วันล่าสุดออก (ป้องกันเพดานขยับตามราคาที่เพิ่ง Breakout เร็วเกินไป)
+            # เพื่อให้หุ้นที่เพิ่งซิ่งในสัปดาห์นี้ ยังคงโชว์สถานะ Breakout ต่อเนื่อง
+            if len(hist) > 5:
+                base_high = float(hist['High'].iloc[:-5].max())
+            elif len(hist) > 1:
                 base_high = float(hist['High'].iloc[:-1].max())
             else:
                 base_high = float(hist['High'].max())
