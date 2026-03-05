@@ -44,8 +44,8 @@ def send_signal_embeds(baskets, is_test_mode):
     add_embeds(baskets["breakout_medium"], "⚡ MEDIUM Breakout (1% - 3%)", 16705372)
     add_embeds(baskets["breakout_low"], "🟢 LOW Breakout (< 1%)", 3447003)
     
-    # เพิ่มกล่องใหม่สำหรับหุ้นที่วิ่งต่อไม่ยอมหยุด
-    add_embeds(baskets["continuing_up"], "🚀🔥 CONTINUING RUN (พุ่งต่อจากจุดเดิม > +3%)", 16738740) 
+    # กล่องสำหรับหุ้นวิ่งต่อ หรือ เด้งฟื้นตัวแรง
+    add_embeds(baskets["continuing_up"], "🚀🔥 CONTINUING / REBOUND (นิวไฮ หรือ ฟื้นตัวแรง)", 16738740) 
     
     add_embeds(baskets["momentum"], "🚀 STRONG MOMENTUM (Daily > +4%)", 15277667)
     add_embeds(baskets["oversold"], "📉 OVERSOLD FOUND (RSI < 30)", 10181046)
@@ -102,7 +102,7 @@ def run_monitor():
         "breakout_high": [],
         "breakout_medium": [],
         "breakout_low": [],
-        "continuing_up": [], # <-- ตะกร้าใบใหม่
+        "continuing_up": [], 
         "momentum": [],
         "oversold": [],
         "tp": [],
@@ -116,7 +116,6 @@ def run_monitor():
         status = item.get('status', 'watching')
         m_type = item.get('market_type', 'UNKNOWN')
         
-        # 🧩 ปลดล็อก 'signal_buy' ออกจากรายชื่อที่จะถูกข้าม (Skip)
         if status in ['sold', 'signal_sell']: 
             continue
 
@@ -151,6 +150,7 @@ def run_monitor():
                 base_high = float(hist['High'].max())
             
             highest_price_db = float(item.get('highest_price') or 0)
+            last_price_db = float(item.get('last_price') or current_price)
             
             update_payload = {
                 "last_price": current_price,
@@ -205,15 +205,22 @@ def run_monitor():
                         signal_baskets["oversold"].append(item_data)
                         signal_triggered = True
 
-            # 🧩 จิ๊กซอว์ชิ้นสำคัญ: แจ้งเตือนซ้ำหากพุ่งทะลุจุดสูงสุดเดิม (Step-up Alert)
+            # 🧩 จิ๊กซอว์ชิ้นที่ 3: ระบบแจ้งเตือนซ้ำแบบสมบูรณ์ (HYBRID LOGIC)
             elif status == 'signal_buy':
-                # เช็คว่าราคาปัจจุบัน พุ่งชนะ highest_price เดิมไปอีก 3% หรือไม่
-                if highest_price_db > 0 and current_price >= (highest_price_db * 1.03):
-                    # คำนวณกำไรรวมตั้งแต่จุด Base (ให้เห็นภาพว่าบวกมาไกลแค่ไหนแล้ว)
+                
+                # เงื่อนไขที่ 1: นิวไฮทะลุยอดเดิม (Trend Following) +3%
+                is_new_high = highest_price_db > 0 and current_price >= (highest_price_db * 1.03)
+                
+                # เงื่อนไขที่ 2: เด้งฟื้นตัวจากราคาวันก่อนหน้า (Momentum Rebound) +5% ตามที่คุณแนะนำ
+                is_strong_rebound = last_price_db > 0 and current_price >= (last_price_db * 1.05)
+                
+                if is_new_high or is_strong_rebound:
+                    # หาเหตุผลเพื่อแสดงในข้อความ
+                    trigger_reason = "🚀 ทำนิวไฮใหม่!" if is_new_high else "🔥 ฟื้นตัวเด้งแรง!"
                     total_increase_pct = ((current_price - base_high) / base_high) * 100
                     diff_from_base = current_price - base_high
                     
-                    stock_info_text = f"**{ticker}** | Price {current_price:.2f} (พุ่งต่ออีกขั้น!) | รวมบวก +{total_increase_pct:.2f}% | + {diff_from_base:.2f}$"
+                    stock_info_text = f"**{ticker}** | Price {current_price:.2f} ({trigger_reason}) | ห่างจากฐาน +{total_increase_pct:.2f}% | + {diff_from_base:.2f}$"
                     
                     signal_baskets["continuing_up"].append({"price": current_price, "text": stock_info_text})
                     signal_triggered = True
