@@ -25,75 +25,56 @@ def notify(msg):
     except: pass
 
 def send_signal_embeds(baskets, is_test_mode):
-    """ส่งตะกร้าสัญญาณเป็นกล่องสี โดยทำการ Sort ตามราคา (ถูกไปแพง) ก่อนส่ง"""
+    """ส่งตะกร้าสัญญาณเป็นกล่องสี โดยแบ่งส่ง (Chunking) เพื่อป้องกันการติด Limit ของ Discord"""
     embeds = []
     
-    # ฟังก์ชันช่วยเรียงลำดับจากราคาน้อยไปมาก และดึงเฉพาะข้อความ (text) ออกมา
-    def sort_and_extract(basket_list):
+    # ฟังก์ชันแบ่งลิสต์เป็นก้อนย่อยๆ
+    def chunk_list(lst, chunk_size):
+        return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
+    # ฟังก์ชันจัดเรียงและสร้าง Embed
+    def add_embeds(basket_list, title, color):
+        if not basket_list: return
+        # เรียงจากถูกไปแพง
         sorted_list = sorted(basket_list, key=lambda x: x['price'])
-        return "\n".join([item['text'] for item in sorted_list])
+        text_list = [item['text'] for item in sorted_list]
+        
+        # หั่นเป็นก้อนๆ ละ 30 บรรทัด (ป้องกันข้อความยาวเกิน 4096 ตัวอักษรต่อ 1 กล่องของ Discord)
+        for chunk in chunk_list(text_list, 30):
+            embeds.append({
+                "title": title,
+                "description": "\n".join(chunk),
+                "color": color
+            })
 
-    # --- 1. กลุ่ม Breakout ---
-    if baskets["breakout_high"]:
-        embeds.append({
-            "title": "🔥 HIGH Breakout (> 3%)",
-            "description": sort_and_extract(baskets["breakout_high"]),
-            "color": 5763719 # สีเขียวสว่าง
-        })
-    if baskets["breakout_medium"]:
-        embeds.append({
-            "title": "⚡ MEDIUM Breakout (1% - 3%)",
-            "description": sort_and_extract(baskets["breakout_medium"]),
-            "color": 16705372 # สีเหลือง/ส้ม
-        })
-    if baskets["breakout_low"]:
-        embeds.append({
-            "title": "🟢 LOW Breakout (< 1%)",
-            "description": sort_and_extract(baskets["breakout_low"]),
-            "color": 3447003 # สีฟ้า
-        })
+    # --- 1. จัดของลงตะกร้า Embed ---
+    add_embeds(baskets["breakout_high"], "🔥 HIGH Breakout (> 3%)", 5763719)
+    add_embeds(baskets["breakout_medium"], "⚡ MEDIUM Breakout (1% - 3%)", 16705372)
+    add_embeds(baskets["breakout_low"], "🟢 LOW Breakout (< 1%)", 3447003)
+    add_embeds(baskets["momentum"], "🚀 STRONG MOMENTUM (Daily > +4%)", 15277667)
+    add_embeds(baskets["oversold"], "📉 OVERSOLD FOUND (RSI < 30)", 10181046)
+    add_embeds(baskets["tp"], "💰 TP TARGET REACHED (Take Profit)", 3066993)
+    add_embeds(baskets["sl"], "❌ SL TRIGGERED (Stop Loss)", 15158332)
 
-    # --- 2. กลุ่ม Momentum (หุ้นพุ่งแรงประจำวัน แต่ยังไม่ทะลุแนวต้าน) ---
-    if baskets["momentum"]:
-        embeds.append({
-            "title": "🚀 STRONG MOMENTUM (Daily > +4%)",
-            "description": sort_and_extract(baskets["momentum"]),
-            "color": 15277667 # สีชมพูสว่าง/บานเย็น (Luminous Vivid Pink)
-        })
-
-    # --- 3. กลุ่ม Oversold ---
-    if baskets["oversold"]:
-        embeds.append({
-            "title": "📉 OVERSOLD FOUND (RSI < 30)",
-            "description": sort_and_extract(baskets["oversold"]),
-            "color": 10181046 # สีม่วง
-        })
-
-    # --- 4. กลุ่ม ทำกำไร (TP) และ ตัดขาดทุน (SL) ---
-    if baskets["tp"]:
-        embeds.append({
-            "title": "💰 TP TARGET REACHED (Take Profit)",
-            "description": sort_and_extract(baskets["tp"]),
-            "color": 3066993 # สีเขียวเข้ม
-        })
-    if baskets["sl"]:
-        embeds.append({
-            "title": "❌ SL TRIGGERED (Stop Loss)",
-            "description": sort_and_extract(baskets["sl"]),
-            "color": 15158332 # สีแดง
-        })
-
-    # ถ้ามีข้อมูลในตะกร้าอย่างน้อย 1 ใบ ให้ส่งออกไปที่ Discord
-    if embeds:
+    # --- 2. ทยอยส่งเข้า Discord ---
+    # Discord ยอมให้ส่งได้สูงสุด 10 Embeds ต่อ 1 ข้อความ และรวมกันห้ามเกิน 6000 ตัวอักษร
+    # เราจะแบ่งส่งทีละ 5 กล่อง เพื่อความปลอดภัยสูงสุด
+    for chunked_embeds in chunk_list(embeds, 5):
         prefix = "🔭 **[MONITOR SUMMARY]**" if is_test_mode else "📡 **[SIGNAL SUMMARY]**"
         payload = {
             "content": prefix,
-            "embeds": embeds
+            "embeds": chunked_embeds
         }
         try:
-            requests.post(DISCORD_URL, json=payload)
+            res = requests.post(DISCORD_URL, json=payload)
+            # เพิ่มตัวเช็ค Error เพื่อให้รู้ว่ามีอะไรพังในระบบของ Discord
+            if res.status_code >= 400:
+                print(f"❌ Discord API Error: {res.status_code} - {res.text}")
         except Exception as e:
             print(f"❌ Failed to send Discord Embed: {e}")
+        
+        # หน่วงเวลา 1 วินาที ป้องกัน Discord แบนฐานส่งข้อความรัวเกินไป (Rate Limit)
+        time.sleep(1)
 
 def calculate_rsi(data, window=14):
     """คำนวณ RSI"""
