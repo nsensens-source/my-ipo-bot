@@ -25,23 +25,39 @@ def notify(msg):
 
 def send_signal_embeds(baskets, is_test_mode):
     embeds = []
-    
-    def chunk_list(lst, chunk_size):
-        return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
 
     def add_embeds(basket_list, title, color):
         if not basket_list: return
         sorted_list = sorted(basket_list, key=lambda x: x['price'])
         text_list = [item['text'] for item in sorted_list]
         
-        # 🛠️ แก้ไข 1: หั่นข้อมูลเหลือแค่ 20 บรรทัดต่อ 1 กล่อง ป้องกันกล่องบวมเกินไป
-        for chunk in chunk_list(text_list, 20):
+        # 🛠️ SMART CHUNKING: นับตามจำนวนตัวอักษร เพื่อให้กล่องยาวที่สุดเท่าที่ Discord จะรับได้ (Limit: 4096)
+        current_chunk = []
+        current_len = 0
+        
+        for text in text_list:
+            # +1 เผื่อตัวอักษรขึ้นบรรทัดใหม่ (\n)
+            if current_len + len(text) + 1 > 4000:
+                embeds.append({
+                    "title": title,
+                    "description": "\n".join(current_chunk),
+                    "color": color
+                })
+                current_chunk = [text]
+                current_len = len(text)
+            else:
+                current_chunk.append(text)
+                current_len += len(text) + 1
+        
+        # เก็บตกส่วนที่เหลือ
+        if current_chunk:
             embeds.append({
                 "title": title,
-                "description": "\n".join(chunk),
+                "description": "\n".join(current_chunk),
                 "color": color
             })
 
+    # 1. สร้างกล่องตามหมวดหมู่
     add_embeds(baskets["breakout_high"], "🔥 HIGH Breakout (> 3%)", 5763719)
     add_embeds(baskets["breakout_medium"], "⚡ MEDIUM Breakout (1% - 3%)", 16705372)
     add_embeds(baskets["breakout_low"], "🟢 LOW Breakout (< 1%)", 3447003)
@@ -52,22 +68,47 @@ def send_signal_embeds(baskets, is_test_mode):
     add_embeds(baskets["tp"], "💰 TP TARGET REACHED (Take Profit)", 3066993)
     add_embeds(baskets["sl"], "❌ SL TRIGGERED (Stop Loss)", 15158332)
 
-    # 🛠️ แก้ไข 2: ทยอยส่งทีละ 3 กล่อง ป้องกันข้อความรวมเกิน 6,000 ตัวอักษรของ Discord
-    for chunked_embeds in chunk_list(embeds, 3):
-        prefix = "🔭 **[MONITOR SUMMARY]**" if is_test_mode else "📡 **[SIGNAL SUMMARY]**"
+    if not embeds: return
+
+    # 2. จัดกลุ่มกล่องเพื่อส่งเข้า Discord (Discord Limit: 6000 chars / Message)
+    prefix = "🔭 **[MONITOR SUMMARY]**" if is_test_mode else "📡 **[SIGNAL SUMMARY]**"
+    
+    current_message_embeds = []
+    current_message_len = len(prefix)
+
+    for emb in embeds:
+        emb_len = len(emb["title"]) + len(emb["description"])
+        
+        # ถ้ารวมกล่องนี้แล้วตัวอักษรเกิน 5500 (เผื่อขอบเขตความปลอดภัย) ให้ยิงข้อความก้อนแรกออกไปก่อน
+        if current_message_len + emb_len > 5500 or len(current_message_embeds) >= 10:
+            payload = {
+                "content": prefix,
+                "embeds": current_message_embeds
+            }
+            try:
+                res = requests.post(DISCORD_URL, json=payload)
+                if res.status_code >= 400:
+                    print(f"❌ Discord API Error: {res.status_code} - {res.text}")
+            except Exception as e:
+                print(f"❌ Failed to send Discord Embed: {e}")
+            
+            # พักหายใจ 1.5 วินาที แล้วรีเซ็ตตะกร้าเตรียมก้อนถัดไป
+            time.sleep(1.5)
+            current_message_embeds = []
+            current_message_len = len(prefix)
+        
+        current_message_embeds.append(emb)
+        current_message_len += emb_len
+
+    # ส่งกล่องที่เหลือชุดสุดท้าย (ถ้ามี)
+    if current_message_embeds:
         payload = {
             "content": prefix,
-            "embeds": chunked_embeds
+            "embeds": current_message_embeds
         }
         try:
-            res = requests.post(DISCORD_URL, json=payload)
-            if res.status_code >= 400:
-                print(f"❌ Discord API Error: {res.status_code} - {res.text}")
-        except Exception as e:
-            print(f"❌ Failed to send Discord Embed: {e}")
-        
-        # หยุดพัก 1.5 วินาที เพื่อให้ Discord ไม่มองว่าเรากำลังสแปมเซิร์ฟเวอร์
-        time.sleep(1.5)
+            requests.post(DISCORD_URL, json=payload)
+        except: pass
 
 def calculate_rsi(data, window=14):
     try:
