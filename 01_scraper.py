@@ -61,8 +61,8 @@ def get_us_market_movers():
     print("🚀 Scanning US Market Movers...")
     tickers = []
     targets = [
-        ("https://finance.yahoo.com/gainers", "AUTO_LONG_US", 25),
-        ("https://finance.yahoo.com/losers", "AUTO_SHORT_US", 25)
+        ("https://finance.yahoo.com/gainers?count=100", "AUTO_LONG_US", 100),
+        ("https://finance.yahoo.com/losers?count=100", "AUTO_SHORT_US", 100)
     ]
     for url, m_type, limit in targets:
         print(f"   👉 Scraping {m_type}...")
