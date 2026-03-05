@@ -18,17 +18,69 @@ IS_TEST_MODE = os.getenv("TEST_MODE", "Off").strip().lower() == "on"
 TABLE_NAME = "ipo_trades_uat" if IS_TEST_MODE else "ipo_trades"
 
 def notify(msg):
-    prefix = "🔭 [MONITOR] " if IS_TEST_MODE else "📡 [SIGNAL] "
-    
-    # ถ้าระบบตรวจพบว่าข้อความเป็นกล่องสี (```ansi) ให้ดึงคำว่า MONITOR เข้าไปไว้ข้างในบรรทัดเดียวกัน
-    if msg.startswith("```ansi"):
-        final_msg = msg.replace("```ansi\n", f"```ansi\n{prefix}")
-    else:
-        final_msg = prefix + msg
-        
+    """ส่งข้อความธรรมดา สำหรับแจ้งเตือนทั่วไป"""
+    prefix = "🔭 **[MONITOR]** " if IS_TEST_MODE else "📡 **[SIGNAL]** "
     try:
-        requests.post(DISCORD_URL, json={"content": final_msg})
+        requests.post(DISCORD_URL, json={"content": prefix + msg})
     except: pass
+
+def send_signal_embeds(baskets, is_test_mode):
+    """ส่งตะกร้าสัญญาณทั้งหมด (Breakout, Oversold, TP, SL) เป็นกล่องสีเข้า Discord รวดเดียว"""
+    embeds = []
+    
+    # --- 1. กลุ่ม Breakout ---
+    if baskets["breakout_high"]:
+        embeds.append({
+            "title": "🔥 HIGH Breakout (> 3%)",
+            "description": "\n".join(baskets["breakout_high"]),
+            "color": 5763719 # สีเขียวสว่าง
+        })
+    if baskets["breakout_medium"]:
+        embeds.append({
+            "title": "⚡ MEDIUM Breakout (1% - 3%)",
+            "description": "\n".join(baskets["breakout_medium"]),
+            "color": 16705372 # สีเหลือง/ส้ม
+        })
+    if baskets["breakout_low"]:
+        embeds.append({
+            "title": "🟢 LOW Breakout (< 1%)",
+            "description": "\n".join(baskets["breakout_low"]),
+            "color": 3447003 # สีฟ้า
+        })
+
+    # --- 2. กลุ่ม Oversold ---
+    if baskets["oversold"]:
+        embeds.append({
+            "title": "📉 OVERSOLD FOUND (RSI < 30)",
+            "description": "\n".join(baskets["oversold"]),
+            "color": 10181046 # สีม่วง
+        })
+
+    # --- 3. กลุ่ม ทำกำไร (TP) และ ตัดขาดทุน (SL) ---
+    if baskets["tp"]:
+        embeds.append({
+            "title": "💰 TP TARGET REACHED (Take Profit)",
+            "description": "\n".join(baskets["tp"]),
+            "color": 3066993 # สีเขียวเข้ม
+        })
+    if baskets["sl"]:
+        embeds.append({
+            "title": "❌ SL TRIGGERED (Stop Loss)",
+            "description": "\n".join(baskets["sl"]),
+            "color": 15158332 # สีแดง
+        })
+
+    # ถ้ามีข้อมูลในตะกร้าอย่างน้อย 1 ใบ ให้ส่งออกไปที่ Discord
+    if embeds:
+        prefix = "🔭 **[MONITOR SUMMARY]**" if is_test_mode else "📡 **[SIGNAL SUMMARY]**"
+        payload = {
+            "content": prefix,
+            "embeds": embeds
+        }
+        try:
+            requests.post(DISCORD_URL, json=payload)
+        except Exception as e:
+            print(f"❌ Failed to send Discord Embed: {e}")
 
 def calculate_rsi(data, window=14):
     """คำนวณ RSI และส่งกลับเป็นค่าตัวเลขตัวเดียว (Float)"""
@@ -61,7 +113,17 @@ def run_monitor():
     updates_count = 0
     signal_count = 0
     error_count = 0
-    deleted_count = 0 # เพิ่มตัวนับจำนวนหุ้นที่ถูกลบ
+    deleted_count = 0 
+
+    # --- 🛒 เตรียมตะกร้าทั้ง 6 ใบไว้จัดกลุ่ม Signals ---
+    signal_baskets = {
+        "breakout_high": [],
+        "breakout_medium": [],
+        "breakout_low": [],
+        "oversold": [],
+        "tp": [],
+        "sl": []
+    }
 
     print("-" * 50)
     
@@ -79,7 +141,7 @@ def run_monitor():
             stock = yf.Ticker(ticker)
             hist = stock.history(period="2d")
             
-            # --- 🗑️ AUTO-DELETE LOGIC (ลบหุ้นที่ตายแล้ว) ---
+            # --- 🗑️ AUTO-DELETE LOGIC ---
             if hist.empty:
                 print("❌ No price data (Delisted or Not Found) -> 🗑️ Auto-Deleting...")
                 supabase.table(TABLE_NAME).delete().eq("ticker", ticker).execute()
@@ -111,41 +173,36 @@ def run_monitor():
             signal_triggered = False
 
             if status == 'watching':
-                # --- 🧹 DATA CLEANUP (ล้างราคาค้าง) ---
+                # --- 🧹 DATA CLEANUP ---
                 if float(item.get('buy_price') or 0) > 0:
                     update_payload['buy_price'] = 0
                     update_payload['highest_price'] = 0
                 # --------------------------------------
 
-               # 1.1 Breakout Strategy (Long/Base/Moonshot)
+                # 1.1 Breakout Strategy
                 if any(x in m_type for x in ['LONG', 'BASE', 'MOONSHOT', 'FAVOURITE']):
                     if base_high > 0 and current_price > base_high:
                         
                         increase_pct = ((current_price - base_high) / base_high) * 100
-                        
-                        # --- 🎨 ระบบสี ANSI (เขียว / เหลือง / ฟ้า) ---
-                        if increase_pct >= 3.0:
-                            strength_status = "\x1b[1;32m🔥 High\x1b[0m"    # สีเขียว
-                        elif increase_pct >= 1.0:
-                            strength_status = "\x1b[1;33m⚡ Medium\x1b[0m" # สีเหลือง
-                        else:
-                            strength_status = "\x1b[1;36m🟢 Low\x1b[0m"    # สีฟ้า
-
                         update_payload['status'] = 'signal_buy'
                         
-                        # 3. สร้างข้อความส่งเข้า Discord
-                        # ใช้ f""" (ฟันหนู 3 ตัว) เพื่อให้ครอบข้อความที่มีสัญลักษณ์พิเศษได้ง่าย
-                        alert_msg = f"""```ansi
-🚀 BREAKOUT: {ticker} Price {current_price:.2f} > Base {base_high:.2f} | 📈 +{increase_pct:.2f}% [{strength_status}]
-```"""
-                        notify(alert_msg)
+                        stock_info = f"**{ticker}** | Price {current_price:.2f} > Base {base_high:.2f} (📈 +{increase_pct:.2f}%)"
+                        
+                        if increase_pct >= 3.0:
+                            signal_baskets["breakout_high"].append(stock_info)
+                        elif increase_pct >= 1.0:
+                            signal_baskets["breakout_medium"].append(stock_info)
+                        else:
+                            signal_baskets["breakout_low"].append(stock_info)
                         
                         signal_triggered = True
 
+                # 1.2 Oversold Strategy
                 elif 'SHORT' in m_type:
                     if rsi_val < 30:
                         update_payload['status'] = 'signal_buy'
-                        notify(f"📉 **OVERSOLD FOUND**: {ticker} RSI {rsi_val:.1f} < 30")
+                        # หย่อนลงตะกร้า Oversold
+                        signal_baskets["oversold"].append(f"**{ticker}** | RSI: {rsi_val:.1f}")
                         signal_triggered = True
 
             elif status == 'holding':
@@ -153,11 +210,16 @@ def run_monitor():
                 if buy_price > 0:
                     if current_price >= buy_price * (1 + tp_pct):
                         update_payload['status'] = 'signal_sell'
-                        notify(f"💰 **TP TARGET REACHED**: {ticker} @ {current_price:.2f} (+{tp_pct*100}%)")
+                        # คำนวณกำไรจริง และหย่อนลงตะกร้า TP
+                        profit_pct = ((current_price - buy_price) / buy_price) * 100
+                        signal_baskets["tp"].append(f"**{ticker}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (💰 +{profit_pct:.2f}%)")
                         signal_triggered = True
+                        
                     elif current_price <= buy_price * (1 - sl_pct):
                         update_payload['status'] = 'signal_sell'
-                        notify(f"❌ **SL TRIGGERED**: {ticker} @ {current_price:.2f} (-{sl_pct*100}%)")
+                        # คำนวณขาดทุนจริง และหย่อนลงตะกร้า SL
+                        loss_pct = ((buy_price - current_price) / buy_price) * 100
+                        signal_baskets["sl"].append(f"**{ticker}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (❌ -{loss_pct:.2f}%)")
                         signal_triggered = True
 
             supabase.table(TABLE_NAME).update(update_payload).eq("ticker", ticker).execute()
@@ -170,13 +232,11 @@ def run_monitor():
             time.sleep(0.1)
 
         except Exception as e:
-            print(f"❌ Error: {e} -> 🗑️ Auto-Deleting...")
-            # ดักจับ Error อื่นๆ ที่อาจทำให้ดึงราคาไม่ได้ ก็สั่งลบทิ้งเช่นกัน
-            try:
-                supabase.table(TABLE_NAME).delete().eq("ticker", ticker).execute()
-                deleted_count += 1
-            except: pass
+            print(f"❌ Error analyzing {ticker}: {e} (Skipping...)")
             error_count += 1
+
+    # --- 📤 เมื่อสแกนจบ เทข้อมูลจากตะกร้าทั้ง 6 ใบส่งเป็นกล่องสีเข้า Discord รวดเดียว ---
+    send_signal_embeds(signal_baskets, IS_TEST_MODE)
 
     summary = f"📊 **Scan Complete**: Checked {updates_count}, Signals {signal_count}, Auto-Deleted {deleted_count} Invalid Stocks."
     print("-" * 50 + f"\n{summary}")
