@@ -53,7 +53,15 @@ def send_signal_embeds(baskets, is_test_mode):
             "color": 3447003 # สีฟ้า
         })
 
-    # --- 2. กลุ่ม Oversold ---
+    # --- 2. กลุ่ม Momentum (หุ้นพุ่งแรงประจำวัน แต่ยังไม่ทะลุแนวต้าน) ---
+    if baskets["momentum"]:
+        embeds.append({
+            "title": "🚀 STRONG MOMENTUM (Daily > +4%)",
+            "description": sort_and_extract(baskets["momentum"]),
+            "color": 15277667 # สีชมพูสว่าง/บานเย็น (Luminous Vivid Pink)
+        })
+
+    # --- 3. กลุ่ม Oversold ---
     if baskets["oversold"]:
         embeds.append({
             "title": "📉 OVERSOLD FOUND (RSI < 30)",
@@ -61,7 +69,7 @@ def send_signal_embeds(baskets, is_test_mode):
             "color": 10181046 # สีม่วง
         })
 
-    # --- 3. กลุ่ม ทำกำไร (TP) และ ตัดขาดทุน (SL) ---
+    # --- 4. กลุ่ม ทำกำไร (TP) และ ตัดขาดทุน (SL) ---
     if baskets["tp"]:
         embeds.append({
             "title": "💰 TP TARGET REACHED (Take Profit)",
@@ -125,6 +133,7 @@ def run_monitor():
         "breakout_high": [],
         "breakout_medium": [],
         "breakout_low": [],
+        "momentum": [], # <-- เพิ่มตะกร้า Momentum ใหม่
         "oversold": [],
         "tp": [],
         "sl": []
@@ -144,8 +153,7 @@ def run_monitor():
 
         try:
             stock = yf.Ticker(ticker)
-            # 🚀 OPTIMIZATION: ดึงข้อมูล 1 ปีแบบม้วนเดียวจบ เพื่อเอามาหาทั้ง ราคาปัจจุบัน, RSI และ Rolling High
-            hist = stock.history(period="1y")
+            hist = stock.history(period="6mo")
             
             if hist.empty:
                 print("❌ No price data (Delisted or Not Found) -> 🗑️ Auto-Deleting...")
@@ -157,9 +165,15 @@ def run_monitor():
             current_price = float(hist['Close'].iloc[-1])
             rsi_val = calculate_rsi(hist['Close'])
             
-            # --- 🚀 LAGGED ROLLING HIGH LOGIC (อัปเดต Base ใหม่เสมอ แต่หน่วงเวลา 5 วัน) ---
-            # หาจุดสูงสุดในรอบ 1 ปี โดยตัด 5 วันล่าสุดออก (ป้องกันเพดานขยับตามราคาที่เพิ่ง Breakout เร็วเกินไป)
-            # เพื่อให้หุ้นที่เพิ่งซิ่งในสัปดาห์นี้ ยังคงโชว์สถานะ Breakout ต่อเนื่อง
+            # --- คำนวณแรงเหวี่ยงรายวัน (Daily Momentum) ---
+            daily_pct = 0.0
+            diff_daily = 0.0
+            if len(hist) >= 2:
+                prev_close = float(hist['Close'].iloc[-2])
+                daily_pct = ((current_price - prev_close) / prev_close) * 100
+                diff_daily = current_price - prev_close
+            
+            # --- 🚀 LAGGED ROLLING HIGH LOGIC ---
             if len(hist) > 5:
                 base_high = float(hist['High'].iloc[:-5].max())
             elif len(hist) > 1:
@@ -167,11 +181,10 @@ def run_monitor():
             else:
                 base_high = float(hist['High'].max())
             
-            # อัปเดตข้อมูลขึ้น Database
             highest_price_db = float(item.get('highest_price') or 0)
             update_payload = {
                 "last_price": current_price,
-                "base_high": base_high, # เซฟค่า Rolling High ใหม่ทุกครั้ง
+                "base_high": base_high,
                 "highest_price": max(current_price, highest_price_db),
                 "last_update": datetime.datetime.now().isoformat()
             }
@@ -183,21 +196,21 @@ def run_monitor():
             signal_triggered = False
 
             if status == 'watching':
-                # DATA CLEANUP
                 if float(item.get('buy_price') or 0) > 0:
                     update_payload['buy_price'] = 0
                     update_payload['highest_price'] = 0
 
-                # 1.1 Breakout Strategy
+                # 1.1 Breakout Strategy & Momentum Strategy
                 if any(x in m_type for x in ['LONG', 'BASE', 'MOONSHOT', 'FAVOURITE']):
+                    is_breakout = False
+                    
+                    # เช็คเงื่อนไขที่ 1: Breakout ทะลุฐาน?
                     if base_high > 0 and current_price > base_high:
-                        
+                        is_breakout = True
                         increase_pct = ((current_price - base_high) / base_high) * 100
-                        diff_price = current_price - base_high # คำนวณส่วนต่างเป็นจำนวนเงิน
+                        diff_price = current_price - base_high
                         
                         update_payload['status'] = 'signal_buy'
-                        
-                        # สร้างข้อความแบบใหม่ มีจำนวนเหรียญ/บาท ต่อท้าย
                         stock_info_text = f"**{ticker}** | Price {current_price:.2f} > Base {base_high:.2f} (+{increase_pct:.2f}%) | + {diff_price:.2f}$"
                         item_data = {"price": current_price, "text": stock_info_text}
                         
@@ -208,6 +221,14 @@ def run_monitor():
                         else:
                             signal_baskets["breakout_low"].append(item_data)
                         
+                        signal_triggered = True
+
+                    # เช็คเงื่อนไขที่ 2: ถ้าไม่เบรคเอาท์ แต่พุ่งแรงมากวันนี้ (>4%) ให้เข้าตะกร้า Momentum!
+                    if not is_breakout and daily_pct >= 4.0:
+                        update_payload['status'] = 'signal_buy'
+                        stock_info_text = f"**{ticker}** | Price {current_price:.2f} (🚀 Today +{daily_pct:.2f}%) | + {diff_daily:.2f}$"
+                        item_data = {"price": current_price, "text": stock_info_text}
+                        signal_baskets["momentum"].append(item_data)
                         signal_triggered = True
 
                 # 1.2 Oversold Strategy
@@ -225,7 +246,7 @@ def run_monitor():
                         update_payload['status'] = 'signal_sell'
                         
                         profit_pct = ((current_price - buy_price) / buy_price) * 100
-                        profit_amt = current_price - buy_price # กำไรเป็นจำนวนเงิน
+                        profit_amt = current_price - buy_price
                         
                         stock_info_text = f"**{ticker}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (💰 +{profit_pct:.2f}% | + {profit_amt:.2f}$)"
                         signal_baskets["tp"].append({"price": current_price, "text": stock_info_text})
@@ -235,7 +256,7 @@ def run_monitor():
                         update_payload['status'] = 'signal_sell'
                         
                         loss_pct = ((buy_price - current_price) / buy_price) * 100
-                        loss_amt = buy_price - current_price # ขาดทุนเป็นจำนวนเงิน
+                        loss_amt = buy_price - current_price
                         
                         stock_info_text = f"**{ticker}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (❌ -{loss_pct:.2f}% | - {loss_amt:.2f}$)"
                         signal_baskets["sl"].append({"price": current_price, "text": stock_info_text})
@@ -254,7 +275,6 @@ def run_monitor():
             print(f"❌ Error analyzing {ticker}: {e} (Skipping...)")
             error_count += 1
 
-    # --- 📤 เมื่อสแกนจบ เทข้อมูลจากตะกร้าส่งเข้า Discord รวดเดียว ---
     send_signal_embeds(signal_baskets, IS_TEST_MODE)
 
     summary = f"📊 **Scan Complete**: Checked {updates_count}, Signals {signal_count}, Auto-Deleted {deleted_count} Invalid Stocks."
