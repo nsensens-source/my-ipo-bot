@@ -32,9 +32,3 @@ jobs:
         run: |
           python 01_scraper.py
           python 02_monitor.py
-          
-          # เช็คเวลาเพื่อส่งสรุปยอด (เฉพาะรอบ 16:45 และ 04:15 ไทย)
-          HOUR=$(date +%H)
-          if [ "$HOUR" == "09" ] || [ "$HOUR" == "21" ]; then
-            python -c "from 02_monitor import daily_summary; daily_summary()"
-          fi
