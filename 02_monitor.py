@@ -33,7 +33,9 @@ def send_signal_embeds(baskets, is_test_mode):
         if not basket_list: return
         sorted_list = sorted(basket_list, key=lambda x: x['price'])
         text_list = [item['text'] for item in sorted_list]
-        for chunk in chunk_list(text_list, 30):
+        
+        # 🛠️ แก้ไข 1: หั่นข้อมูลเหลือแค่ 20 บรรทัดต่อ 1 กล่อง ป้องกันกล่องบวมเกินไป
+        for chunk in chunk_list(text_list, 20):
             embeds.append({
                 "title": title,
                 "description": "\n".join(chunk),
@@ -44,15 +46,14 @@ def send_signal_embeds(baskets, is_test_mode):
     add_embeds(baskets["breakout_medium"], "⚡ MEDIUM Breakout (1% - 3%)", 16705372)
     add_embeds(baskets["breakout_low"], "🟢 LOW Breakout (< 1%)", 3447003)
     
-    # กล่องสำหรับหุ้นวิ่งต่อ หรือ เด้งฟื้นตัวแรง
     add_embeds(baskets["continuing_up"], "🚀🔥 CONTINUING / REBOUND (นิวไฮ หรือ ฟื้นตัวแรง)", 16738740) 
-    
     add_embeds(baskets["momentum"], "🚀 STRONG MOMENTUM (Daily > +4%)", 15277667)
     add_embeds(baskets["oversold"], "📉 OVERSOLD FOUND (RSI < 30)", 10181046)
     add_embeds(baskets["tp"], "💰 TP TARGET REACHED (Take Profit)", 3066993)
     add_embeds(baskets["sl"], "❌ SL TRIGGERED (Stop Loss)", 15158332)
 
-    for chunked_embeds in chunk_list(embeds, 5):
+    # 🛠️ แก้ไข 2: ทยอยส่งทีละ 3 กล่อง ป้องกันข้อความรวมเกิน 6,000 ตัวอักษรของ Discord
+    for chunked_embeds in chunk_list(embeds, 3):
         prefix = "🔭 **[MONITOR SUMMARY]**" if is_test_mode else "📡 **[SIGNAL SUMMARY]**"
         payload = {
             "content": prefix,
@@ -64,7 +65,9 @@ def send_signal_embeds(baskets, is_test_mode):
                 print(f"❌ Discord API Error: {res.status_code} - {res.text}")
         except Exception as e:
             print(f"❌ Failed to send Discord Embed: {e}")
-        time.sleep(1)
+        
+        # หยุดพัก 1.5 วินาที เพื่อให้ Discord ไม่มองว่าเรากำลังสแปมเซิร์ฟเวอร์
+        time.sleep(1.5)
 
 def calculate_rsi(data, window=14):
     try:
@@ -205,17 +208,11 @@ def run_monitor():
                         signal_baskets["oversold"].append(item_data)
                         signal_triggered = True
 
-            # 🧩 จิ๊กซอว์ชิ้นที่ 3: ระบบแจ้งเตือนซ้ำแบบสมบูรณ์ (HYBRID LOGIC)
             elif status == 'signal_buy':
-                
-                # เงื่อนไขที่ 1: นิวไฮทะลุยอดเดิม (Trend Following) +3%
                 is_new_high = highest_price_db > 0 and current_price >= (highest_price_db * 1.03)
-                
-                # เงื่อนไขที่ 2: เด้งฟื้นตัวจากราคาวันก่อนหน้า (Momentum Rebound) +5% ตามที่คุณแนะนำ
                 is_strong_rebound = last_price_db > 0 and current_price >= (last_price_db * 1.05)
                 
                 if is_new_high or is_strong_rebound:
-                    # หาเหตุผลเพื่อแสดงในข้อความ
                     trigger_reason = "🚀 ทำนิวไฮใหม่!" if is_new_high else "🔥 ฟื้นตัวเด้งแรง!"
                     total_increase_pct = ((current_price - base_high) / base_high) * 100
                     diff_from_base = current_price - base_high
