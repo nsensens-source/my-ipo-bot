@@ -1,4 +1,5 @@
 import os
+import sys
 import yfinance as yf
 from supabase import create_client
 import requests
@@ -23,7 +24,7 @@ def notify(msg):
         requests.post(DISCORD_URL, json={"content": prefix + msg})
     except: pass
 
-def send_signal_embeds(baskets, is_test_mode):
+def send_signal_embeds(baskets, is_test_mode, target_market):
     embeds = []
 
     def add_embeds(basket_list, title, color):
@@ -70,8 +71,12 @@ def send_signal_embeds(baskets, is_test_mode):
 
     if not embeds: return
 
-    # จัดกลุ่มกล่องเพื่อส่งเข้า Discord
-    prefix = "🔭 **[MONITOR SUMMARY]**" if is_test_mode else "📡 **[SIGNAL SUMMARY]**"
+    # จัดกลุ่มกล่องเพื่อส่งเข้า Discord (เพิ่ม Market Label)
+    market_label = ""
+    if target_market == "TH": market_label = " [THAI MARKET]"
+    elif target_market == "US": market_label = " [US MARKET]"
+
+    prefix = f"🔭 **[MONITOR SUMMARY{market_label}]**" if is_test_mode else f"📡 **[SIGNAL SUMMARY{market_label}]**"
     
     current_message_embeds = []
     current_message_len = len(prefix)
@@ -120,8 +125,8 @@ def calculate_rsi(data, window=14):
     except:
         return 50.0
 
-def run_monitor():
-    print(f"🚀 Scanning for Signals on Table: '{TABLE_NAME}'")
+def run_monitor(target_market="ALL"):
+    print(f"🚀 Scanning for Signals on Table: '{TABLE_NAME}' | Market: {target_market}")
     
     try:
         res = supabase.table(TABLE_NAME).select("*").execute()
@@ -133,6 +138,17 @@ def run_monitor():
     if not stocks:
         print("⚠️ Warning: Table is empty.")
         return
+
+    # --- 🌐 FILTER BY MARKET ---
+    filtered_stocks = []
+    for item in stocks:
+        is_thai = '.BK' in item['ticker']
+        if target_market == "TH" and not is_thai: continue
+        if target_market == "US" and is_thai: continue
+        filtered_stocks.append(item)
+    
+    stocks = filtered_stocks
+    print(f"📊 Found {len(stocks)} stocks matching market '{target_market}'")
 
     updates_count = 0
     signal_count = 0
@@ -183,11 +199,9 @@ def run_monitor():
                 curr_vol = float(hist['Volume'].iloc[-1])
                 if avg_vol > 0:
                     vol_ratio = curr_vol / avg_vol
-                    # ถ้าวอลุ่มเข้ามากกว่าปกติ 1.5 เท่า จะขึ้นแจ้งเตือนพิเศษ
                     if vol_ratio >= 1.5:
                         vol_alert = f" | 📊 Vol {vol_ratio:.1f}x"
             
-            # 🛠️ ปรับปรุง: สร้างลิงก์คลิกไปหน้าดูกราฟ Yahoo Finance
             ticker_link = f"[{ticker}](https://finance.yahoo.com/quote/{ticker})"
 
             daily_pct = 0.0
@@ -234,10 +248,8 @@ def run_monitor():
                         diff_price = current_price - base_high
                         
                         update_payload['status'] = 'signal_buy'
-                        # เพิ่มลิงก์และวอลุ่มเข้าไปในข้อความ
                         stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} > Base {base_high:.2f} (+{increase_pct:.2f}%){vol_alert}"
                         
-                        # เพิ่มคีย์ "pct" เข้าไปใน Dict เพื่อให้บอทเอาไปใช้เรียงลำดับความแรง
                         item_data = {"price": current_price, "pct": increase_pct, "text": stock_info_text}
                         
                         if increase_pct >= 3.0:
@@ -259,7 +271,6 @@ def run_monitor():
                 elif 'SHORT' in m_type:
                     if rsi_val < 30:
                         update_payload['status'] = 'signal_buy'
-                        # สำหรับ Oversold เราให้เรียงลำดับจาก RSI ต่ำไปสูง โดยใช้ % ติดลบ
                         item_data = {"price": current_price, "pct": -rsi_val, "text": f"**{ticker_link}** | Price {current_price:.2f} | RSI: {rsi_val:.1f}"}
                         signal_baskets["oversold"].append(item_data)
                         signal_triggered = True
@@ -299,7 +310,6 @@ def run_monitor():
                         loss_amt = buy_price - current_price
                         
                         stock_info_text = f"**{ticker_link}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (❌ -{loss_pct:.2f}% | - {loss_amt:.2f}$)"
-                        # ติดลบเพื่อให้ตัวที่เจ็บหนักสุดอยู่ล่างๆ
                         item_data = {"price": current_price, "pct": -loss_pct, "text": stock_info_text}
                         signal_baskets["sl"].append(item_data)
                         signal_triggered = True
@@ -317,12 +327,19 @@ def run_monitor():
             print(f"❌ Error analyzing {ticker}: {e} (Skipping...)")
             error_count += 1
 
-    send_signal_embeds(signal_baskets, IS_TEST_MODE)
+    send_signal_embeds(signal_baskets, IS_TEST_MODE, target_market)
 
-    summary = f"📊 **Scan Complete**: Checked {updates_count}, Signals {signal_count}, Auto-Deleted {deleted_count} Invalid Stocks."
+    market_label = ""
+    if target_market == "TH": market_label = " (THAI)"
+    elif target_market == "US": market_label = " (US)"
+    
+    summary = f"📊 **Scan Complete{market_label}**: Checked {updates_count}, Signals {signal_count}, Auto-Deleted {deleted_count} Invalid Stocks."
     print("-" * 50 + f"\n{summary}")
     if IS_TEST_MODE and signal_count > 0:
         notify(summary)
 
 if __name__ == "__main__":
-    run_monitor()
+    market_arg = "ALL"
+    if len(sys.argv) > 1:
+        market_arg = sys.argv[1].upper()
+    run_monitor(market_arg)
