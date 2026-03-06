@@ -335,7 +335,7 @@ def run_monitor(target_market="ALL"):
     
     # 3. ถ้ามีรายชื่อ ให้ส่งข้อความอีก 1 กล่องเป็นลิสต์เพียวๆ คั่นด้วยลูกน้ำ (,)
     if copy_list:
-        ticker_str = ", ".join(copy_list)
+        ticker_str = "\n".join(copy_list)
         # ใช้ ```text ครอบ เพื่อให้เป็น Code Block ใน Discord (กดก๊อปปี้ง่ายมาก)
         copy_msg = f"📋 **Copy List (นำไปวางใน TradingView หรือ Google Sheets ได้เลย):**\n```text\n{ticker_str}\n```"
         
