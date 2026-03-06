@@ -123,9 +123,30 @@ def calculate_rsi(data, window=14):
 def run_monitor(target_market="ALL"):
     print(f"🚀 Scanning for Signals on Table: '{TABLE_NAME}' | Market: {target_market}")
     
+    all_stocks = []
+    offset = 0
+    limit = 1000
+    
     try:
-        res = supabase.table(TABLE_NAME).select("*").execute()
-        stocks = res.data
+        # 🧩 อัปเกรด: ระบบ Pagination ดึงข้อมูลทีละ 1000 แถว ทะลวงกำแพงลิมิตของ Supabase
+        while True:
+            res = supabase.table(TABLE_NAME).select("*").range(offset, offset + limit - 1).execute()
+            data = res.data
+            
+            if not data:
+                break # ถ้าดึงมาแล้วไม่มีข้อมูล แสดงว่าหมดตารางแล้ว ให้หยุดลูป
+                
+            all_stocks.extend(data)
+            
+            # ถ้าข้อมูลที่ดึงมาได้น้อยกว่า limit แสดงว่าเป็นหน้าสุดท้ายแล้ว
+            if len(data) < limit:
+                break
+                
+            offset += limit # ขยับหน้าถัดไป
+            
+        stocks = all_stocks
+        print(f"📦 Total stocks fetched from Database: {len(stocks)}")
+        
     except Exception as e:
         print(f"❌ Database Error: {e}")
         return
@@ -142,7 +163,7 @@ def run_monitor(target_market="ALL"):
         filtered_stocks.append(item)
     
     stocks = filtered_stocks
-    print(f"📊 Found {len(stocks)} stocks matching market '{target_market}'")
+    print(f"📊 Filtering applied. Found {len(stocks)} stocks matching market '{target_market}' to scan.")
 
     updates_count = 0
     signal_count = 0
@@ -245,7 +266,6 @@ def run_monitor(target_market="ALL"):
                         update_payload['status'] = 'signal_buy'
                         stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} > Base {base_high:.2f} (+{increase_pct:.2f}%){vol_alert}"
                         
-                        # 🧩 เพิ่ม 'ticker': ticker เข้าไปเพื่อเตรียมทำลิสต์สำหรับก๊อปปี้
                         item_data = {"price": current_price, "pct": increase_pct, "text": stock_info_text, "ticker": ticker}
                         
                         if increase_pct >= 3.0:
@@ -318,11 +338,8 @@ def run_monitor(target_market="ALL"):
             print(f"❌ Error analyzing {ticker}: {e} (Skipping...)")
             error_count += 1
 
-    # 1. ส่งข้อมูลแบบกล่องสี (Embeds) เหมือนเดิม
     send_signal_embeds(signal_baskets, IS_TEST_MODE, target_market)
 
-    # 🧩 2. ระบบรวบรวมรายชื่อสำหรับการ Copy-Paste 
-    # (ดึงเฉพาะตะกร้าที่เป็นสัญญาณซื้อ/ถือต่อ เพื่อเอาไปเข้า Watchlist)
     actionable_baskets = ["breakout_high", "breakout_medium", "breakout_low", "continuing_up", "momentum", "oversold"]
     copy_list = []
     
@@ -330,20 +347,16 @@ def run_monitor(target_market="ALL"):
         for item in signal_baskets[b]:
             copy_list.append(item['ticker'])
             
-    # ลบชื่อที่ซ้ำกันออก (เผื่อกรณีมันติดหลายเงื่อนไข)
     copy_list = list(set(copy_list))
     
-    # 3. ถ้ามีรายชื่อ ให้ส่งข้อความอีก 1 กล่องเป็นลิสต์เพียวๆ คั่นด้วยลูกน้ำ (,)
     if copy_list:
         ticker_str = "\n".join(copy_list)
-        # ใช้ ```text ครอบ เพื่อให้เป็น Code Block ใน Discord (กดก๊อปปี้ง่ายมาก)
-        copy_msg = f"📋 **Copy List (นำไปวางใน TradingView หรือ Google Sheets ได้เลย):**\n```text\n{ticker_str}\n```"
+        copy_msg = f"📋 **Copy List:**\n```text\n{ticker_str}\n```"
         
         try:
             requests.post(DISCORD_URL, json={"content": copy_msg})
         except: pass
 
-    # ส่งข้อความสรุปการสแกนปิดท้าย
     market_label = ""
     if target_market == "TH": market_label = " (THAI)"
     elif target_market == "US": market_label = " (US)"
