@@ -30,11 +30,9 @@ def send_signal_embeds(baskets, is_test_mode, target_market):
     def add_embeds(basket_list, title, color):
         if not basket_list: return
         
-        # 🛠️ ปรับปรุงการเรียงลำดับ: เรียงตาม % ที่บวกเยอะสุดไปน้อยสุด (ถ้ามี) ถ้าไม่มีให้เรียงตามราคาถูกไปแพง
         sorted_list = sorted(basket_list, key=lambda x: x.get('pct', -x['price']), reverse=True)
         text_list = [item['text'] for item in sorted_list]
         
-        # SMART CHUNKING: นับตามจำนวนตัวอักษร
         current_chunk = []
         current_len = 0
         
@@ -58,11 +56,9 @@ def send_signal_embeds(baskets, is_test_mode, target_market):
                 "color": color
             })
 
-    # สร้างกล่องตามหมวดหมู่
     add_embeds(baskets["breakout_high"], "🔥 HIGH Breakout (> 3%)", 5763719)
     add_embeds(baskets["breakout_medium"], "⚡ MEDIUM Breakout (1% - 3%)", 16705372)
     add_embeds(baskets["breakout_low"], "🟢 LOW Breakout (< 1%)", 3447003)
-    
     add_embeds(baskets["continuing_up"], "🚀🔥 CONTINUING / REBOUND (นิวไฮ หรือ ฟื้นตัวแรง)", 16738740) 
     add_embeds(baskets["momentum"], "🚀 STRONG MOMENTUM (Daily > +4%)", 15277667)
     add_embeds(baskets["oversold"], "📉 OVERSOLD FOUND (RSI < 30)", 10181046)
@@ -71,7 +67,6 @@ def send_signal_embeds(baskets, is_test_mode, target_market):
 
     if not embeds: return
 
-    # จัดกลุ่มกล่องเพื่อส่งเข้า Discord (เพิ่ม Market Label)
     market_label = ""
     if target_market == "TH": market_label = " [THAI MARKET]"
     elif target_market == "US": market_label = " [US MARKET]"
@@ -139,7 +134,6 @@ def run_monitor(target_market="ALL"):
         print("⚠️ Warning: Table is empty.")
         return
 
-    # --- 🌐 FILTER BY MARKET ---
     filtered_stocks = []
     for item in stocks:
         is_thai = '.BK' in item['ticker']
@@ -192,7 +186,6 @@ def run_monitor(target_market="ALL"):
             current_price = float(hist['Close'].iloc[-1])
             rsi_val = calculate_rsi(hist['Close'])
             
-            # 🛠️ ปรับปรุง: คำนวณ Volume Ratio (วอลุ่มวันนี้ เทียบกับ ค่าเฉลี่ย 1 เดือนที่ผ่านมา)
             vol_alert = ""
             if len(hist) > 20:
                 avg_vol = hist['Volume'].iloc[:-1].tail(20).mean()
@@ -202,7 +195,9 @@ def run_monitor(target_market="ALL"):
                     if vol_ratio >= 1.5:
                         vol_alert = f" | 📊 Vol {vol_ratio:.1f}x"
             
-            ticker_link = f"[{ticker}](https://finance.yahoo.com/quote/{ticker})"
+            gf_ticker = ticker.replace('.BK', ':BKK')
+            gf_link = f"[GF](https://www.google.com/finance?q={gf_ticker})"
+            ticker_link = f"[{ticker}](https://finance.yahoo.com/quote/{ticker}) {gf_link}"
 
             daily_pct = 0.0
             diff_daily = 0.0
@@ -250,7 +245,8 @@ def run_monitor(target_market="ALL"):
                         update_payload['status'] = 'signal_buy'
                         stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} > Base {base_high:.2f} (+{increase_pct:.2f}%){vol_alert}"
                         
-                        item_data = {"price": current_price, "pct": increase_pct, "text": stock_info_text}
+                        # 🧩 เพิ่ม 'ticker': ticker เข้าไปเพื่อเตรียมทำลิสต์สำหรับก๊อปปี้
+                        item_data = {"price": current_price, "pct": increase_pct, "text": stock_info_text, "ticker": ticker}
                         
                         if increase_pct >= 3.0:
                             signal_baskets["breakout_high"].append(item_data)
@@ -264,14 +260,14 @@ def run_monitor(target_market="ALL"):
                     if not is_breakout and daily_pct >= 4.0:
                         update_payload['status'] = 'signal_buy'
                         stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} (🚀 Today +{daily_pct:.2f}%){vol_alert}"
-                        item_data = {"price": current_price, "pct": daily_pct, "text": stock_info_text}
+                        item_data = {"price": current_price, "pct": daily_pct, "text": stock_info_text, "ticker": ticker}
                         signal_baskets["momentum"].append(item_data)
                         signal_triggered = True
 
                 elif 'SHORT' in m_type:
                     if rsi_val < 30:
                         update_payload['status'] = 'signal_buy'
-                        item_data = {"price": current_price, "pct": -rsi_val, "text": f"**{ticker_link}** | Price {current_price:.2f} | RSI: {rsi_val:.1f}"}
+                        item_data = {"price": current_price, "pct": -rsi_val, "text": f"**{ticker_link}** | Price {current_price:.2f} | RSI: {rsi_val:.1f}", "ticker": ticker}
                         signal_baskets["oversold"].append(item_data)
                         signal_triggered = True
 
@@ -284,8 +280,7 @@ def run_monitor(target_market="ALL"):
                     total_increase_pct = ((current_price - base_high) / base_high) * 100
                     
                     stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} ({trigger_reason}){vol_alert} | ห่างจากฐาน +{total_increase_pct:.2f}%"
-                    
-                    item_data = {"price": current_price, "pct": total_increase_pct, "text": stock_info_text}
+                    item_data = {"price": current_price, "pct": total_increase_pct, "text": stock_info_text, "ticker": ticker}
                     signal_baskets["continuing_up"].append(item_data)
                     signal_triggered = True
 
@@ -294,23 +289,19 @@ def run_monitor(target_market="ALL"):
                 if buy_price > 0:
                     if current_price >= buy_price * (1 + tp_pct):
                         update_payload['status'] = 'signal_sell'
-                        
                         profit_pct = ((current_price - buy_price) / buy_price) * 100
                         profit_amt = current_price - buy_price
-                        
                         stock_info_text = f"**{ticker_link}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (💰 +{profit_pct:.2f}% | + {profit_amt:.2f}$)"
-                        item_data = {"price": current_price, "pct": profit_pct, "text": stock_info_text}
+                        item_data = {"price": current_price, "pct": profit_pct, "text": stock_info_text, "ticker": ticker}
                         signal_baskets["tp"].append(item_data)
                         signal_triggered = True
                         
                     elif current_price <= buy_price * (1 - sl_pct):
                         update_payload['status'] = 'signal_sell'
-                        
                         loss_pct = ((buy_price - current_price) / buy_price) * 100
                         loss_amt = buy_price - current_price
-                        
                         stock_info_text = f"**{ticker_link}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (❌ -{loss_pct:.2f}% | - {loss_amt:.2f}$)"
-                        item_data = {"price": current_price, "pct": -loss_pct, "text": stock_info_text}
+                        item_data = {"price": current_price, "pct": -loss_pct, "text": stock_info_text, "ticker": ticker}
                         signal_baskets["sl"].append(item_data)
                         signal_triggered = True
 
@@ -327,8 +318,32 @@ def run_monitor(target_market="ALL"):
             print(f"❌ Error analyzing {ticker}: {e} (Skipping...)")
             error_count += 1
 
+    # 1. ส่งข้อมูลแบบกล่องสี (Embeds) เหมือนเดิม
     send_signal_embeds(signal_baskets, IS_TEST_MODE, target_market)
 
+    # 🧩 2. ระบบรวบรวมรายชื่อสำหรับการ Copy-Paste 
+    # (ดึงเฉพาะตะกร้าที่เป็นสัญญาณซื้อ/ถือต่อ เพื่อเอาไปเข้า Watchlist)
+    actionable_baskets = ["breakout_high", "breakout_medium", "breakout_low", "continuing_up", "momentum", "oversold"]
+    copy_list = []
+    
+    for b in actionable_baskets:
+        for item in signal_baskets[b]:
+            copy_list.append(item['ticker'])
+            
+    # ลบชื่อที่ซ้ำกันออก (เผื่อกรณีมันติดหลายเงื่อนไข)
+    copy_list = list(set(copy_list))
+    
+    # 3. ถ้ามีรายชื่อ ให้ส่งข้อความอีก 1 กล่องเป็นลิสต์เพียวๆ คั่นด้วยลูกน้ำ (,)
+    if copy_list:
+        ticker_str = ", ".join(copy_list)
+        # ใช้ ```text ครอบ เพื่อให้เป็น Code Block ใน Discord (กดก๊อปปี้ง่ายมาก)
+        copy_msg = f"📋 **Copy List (นำไปวางใน TradingView หรือ Google Sheets ได้เลย):**\n```text\n{ticker_str}\n```"
+        
+        try:
+            requests.post(DISCORD_URL, json={"content": copy_msg})
+        except: pass
+
+    # ส่งข้อความสรุปการสแกนปิดท้าย
     market_label = ""
     if target_market == "TH": market_label = " (THAI)"
     elif target_market == "US": market_label = " (US)"
