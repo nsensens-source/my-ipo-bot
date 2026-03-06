@@ -28,15 +28,16 @@ def send_signal_embeds(baskets, is_test_mode):
 
     def add_embeds(basket_list, title, color):
         if not basket_list: return
-        sorted_list = sorted(basket_list, key=lambda x: x['price'])
+        
+        # 🛠️ ปรับปรุงการเรียงลำดับ: เรียงตาม % ที่บวกเยอะสุดไปน้อยสุด (ถ้ามี) ถ้าไม่มีให้เรียงตามราคาถูกไปแพง
+        sorted_list = sorted(basket_list, key=lambda x: x.get('pct', -x['price']), reverse=True)
         text_list = [item['text'] for item in sorted_list]
         
-        # 🛠️ SMART CHUNKING: นับตามจำนวนตัวอักษร เพื่อให้กล่องยาวที่สุดเท่าที่ Discord จะรับได้ (Limit: 4096)
+        # SMART CHUNKING: นับตามจำนวนตัวอักษร
         current_chunk = []
         current_len = 0
         
         for text in text_list:
-            # +1 เผื่อตัวอักษรขึ้นบรรทัดใหม่ (\n)
             if current_len + len(text) + 1 > 4000:
                 embeds.append({
                     "title": title,
@@ -49,7 +50,6 @@ def send_signal_embeds(baskets, is_test_mode):
                 current_chunk.append(text)
                 current_len += len(text) + 1
         
-        # เก็บตกส่วนที่เหลือ
         if current_chunk:
             embeds.append({
                 "title": title,
@@ -57,7 +57,7 @@ def send_signal_embeds(baskets, is_test_mode):
                 "color": color
             })
 
-    # 1. สร้างกล่องตามหมวดหมู่
+    # สร้างกล่องตามหมวดหมู่
     add_embeds(baskets["breakout_high"], "🔥 HIGH Breakout (> 3%)", 5763719)
     add_embeds(baskets["breakout_medium"], "⚡ MEDIUM Breakout (1% - 3%)", 16705372)
     add_embeds(baskets["breakout_low"], "🟢 LOW Breakout (< 1%)", 3447003)
@@ -70,7 +70,7 @@ def send_signal_embeds(baskets, is_test_mode):
 
     if not embeds: return
 
-    # 2. จัดกลุ่มกล่องเพื่อส่งเข้า Discord (Discord Limit: 6000 chars / Message)
+    # จัดกลุ่มกล่องเพื่อส่งเข้า Discord
     prefix = "🔭 **[MONITOR SUMMARY]**" if is_test_mode else "📡 **[SIGNAL SUMMARY]**"
     
     current_message_embeds = []
@@ -79,7 +79,6 @@ def send_signal_embeds(baskets, is_test_mode):
     for emb in embeds:
         emb_len = len(emb["title"]) + len(emb["description"])
         
-        # ถ้ารวมกล่องนี้แล้วตัวอักษรเกิน 5500 (เผื่อขอบเขตความปลอดภัย) ให้ยิงข้อความก้อนแรกออกไปก่อน
         if current_message_len + emb_len > 5500 or len(current_message_embeds) >= 10:
             payload = {
                 "content": prefix,
@@ -92,7 +91,6 @@ def send_signal_embeds(baskets, is_test_mode):
             except Exception as e:
                 print(f"❌ Failed to send Discord Embed: {e}")
             
-            # พักหายใจ 1.5 วินาที แล้วรีเซ็ตตะกร้าเตรียมก้อนถัดไป
             time.sleep(1.5)
             current_message_embeds = []
             current_message_len = len(prefix)
@@ -100,7 +98,6 @@ def send_signal_embeds(baskets, is_test_mode):
         current_message_embeds.append(emb)
         current_message_len += emb_len
 
-    # ส่งกล่องที่เหลือชุดสุดท้าย (ถ้ามี)
     if current_message_embeds:
         payload = {
             "content": prefix,
@@ -179,6 +176,20 @@ def run_monitor():
             current_price = float(hist['Close'].iloc[-1])
             rsi_val = calculate_rsi(hist['Close'])
             
+            # 🛠️ ปรับปรุง: คำนวณ Volume Ratio (วอลุ่มวันนี้ เทียบกับ ค่าเฉลี่ย 1 เดือนที่ผ่านมา)
+            vol_alert = ""
+            if len(hist) > 20:
+                avg_vol = hist['Volume'].iloc[:-1].tail(20).mean()
+                curr_vol = float(hist['Volume'].iloc[-1])
+                if avg_vol > 0:
+                    vol_ratio = curr_vol / avg_vol
+                    # ถ้าวอลุ่มเข้ามากกว่าปกติ 1.5 เท่า จะขึ้นแจ้งเตือนพิเศษ
+                    if vol_ratio >= 1.5:
+                        vol_alert = f" | 📊 Vol {vol_ratio:.1f}x"
+            
+            # 🛠️ ปรับปรุง: สร้างลิงก์คลิกไปหน้าดูกราฟ Yahoo Finance
+            ticker_link = f"[{ticker}](https://finance.yahoo.com/quote/{ticker})"
+
             daily_pct = 0.0
             diff_daily = 0.0
             if len(hist) >= 2:
@@ -223,8 +234,11 @@ def run_monitor():
                         diff_price = current_price - base_high
                         
                         update_payload['status'] = 'signal_buy'
-                        stock_info_text = f"**{ticker}** | Price {current_price:.2f} > Base {base_high:.2f} (+{increase_pct:.2f}%) | + {diff_price:.2f}$"
-                        item_data = {"price": current_price, "text": stock_info_text}
+                        # เพิ่มลิงก์และวอลุ่มเข้าไปในข้อความ
+                        stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} > Base {base_high:.2f} (+{increase_pct:.2f}%){vol_alert}"
+                        
+                        # เพิ่มคีย์ "pct" เข้าไปใน Dict เพื่อให้บอทเอาไปใช้เรียงลำดับความแรง
+                        item_data = {"price": current_price, "pct": increase_pct, "text": stock_info_text}
                         
                         if increase_pct >= 3.0:
                             signal_baskets["breakout_high"].append(item_data)
@@ -237,15 +251,16 @@ def run_monitor():
 
                     if not is_breakout and daily_pct >= 4.0:
                         update_payload['status'] = 'signal_buy'
-                        stock_info_text = f"**{ticker}** | Price {current_price:.2f} (🚀 Today +{daily_pct:.2f}%) | + {diff_daily:.2f}$"
-                        item_data = {"price": current_price, "text": stock_info_text}
+                        stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} (🚀 Today +{daily_pct:.2f}%){vol_alert}"
+                        item_data = {"price": current_price, "pct": daily_pct, "text": stock_info_text}
                         signal_baskets["momentum"].append(item_data)
                         signal_triggered = True
 
                 elif 'SHORT' in m_type:
                     if rsi_val < 30:
                         update_payload['status'] = 'signal_buy'
-                        item_data = {"price": current_price, "text": f"**{ticker}** | Price {current_price:.2f} | RSI: {rsi_val:.1f}"}
+                        # สำหรับ Oversold เราให้เรียงลำดับจาก RSI ต่ำไปสูง โดยใช้ % ติดลบ
+                        item_data = {"price": current_price, "pct": -rsi_val, "text": f"**{ticker_link}** | Price {current_price:.2f} | RSI: {rsi_val:.1f}"}
                         signal_baskets["oversold"].append(item_data)
                         signal_triggered = True
 
@@ -256,11 +271,11 @@ def run_monitor():
                 if is_new_high or is_strong_rebound:
                     trigger_reason = "🚀 ทำนิวไฮใหม่!" if is_new_high else "🔥 ฟื้นตัวเด้งแรง!"
                     total_increase_pct = ((current_price - base_high) / base_high) * 100
-                    diff_from_base = current_price - base_high
                     
-                    stock_info_text = f"**{ticker}** | Price {current_price:.2f} ({trigger_reason}) | ห่างจากฐาน +{total_increase_pct:.2f}% | + {diff_from_base:.2f}$"
+                    stock_info_text = f"**{ticker_link}** | Price {current_price:.2f} ({trigger_reason}){vol_alert} | ห่างจากฐาน +{total_increase_pct:.2f}%"
                     
-                    signal_baskets["continuing_up"].append({"price": current_price, "text": stock_info_text})
+                    item_data = {"price": current_price, "pct": total_increase_pct, "text": stock_info_text}
+                    signal_baskets["continuing_up"].append(item_data)
                     signal_triggered = True
 
             elif status == 'holding':
@@ -272,8 +287,9 @@ def run_monitor():
                         profit_pct = ((current_price - buy_price) / buy_price) * 100
                         profit_amt = current_price - buy_price
                         
-                        stock_info_text = f"**{ticker}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (💰 +{profit_pct:.2f}% | + {profit_amt:.2f}$)"
-                        signal_baskets["tp"].append({"price": current_price, "text": stock_info_text})
+                        stock_info_text = f"**{ticker_link}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (💰 +{profit_pct:.2f}% | + {profit_amt:.2f}$)"
+                        item_data = {"price": current_price, "pct": profit_pct, "text": stock_info_text}
+                        signal_baskets["tp"].append(item_data)
                         signal_triggered = True
                         
                     elif current_price <= buy_price * (1 - sl_pct):
@@ -282,8 +298,10 @@ def run_monitor():
                         loss_pct = ((buy_price - current_price) / buy_price) * 100
                         loss_amt = buy_price - current_price
                         
-                        stock_info_text = f"**{ticker}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (❌ -{loss_pct:.2f}% | - {loss_amt:.2f}$)"
-                        signal_baskets["sl"].append({"price": current_price, "text": stock_info_text})
+                        stock_info_text = f"**{ticker_link}** | Buy {buy_price:.2f} ➔ Sell {current_price:.2f} (❌ -{loss_pct:.2f}% | - {loss_amt:.2f}$)"
+                        # ติดลบเพื่อให้ตัวที่เจ็บหนักสุดอยู่ล่างๆ
+                        item_data = {"price": current_price, "pct": -loss_pct, "text": stock_info_text}
+                        signal_baskets["sl"].append(item_data)
                         signal_triggered = True
 
             supabase.table(TABLE_NAME).update(update_payload).eq("ticker", ticker).execute()
