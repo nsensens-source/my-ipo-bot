@@ -2,10 +2,13 @@ name: Global Trading Bot (Main System)
 
 on:
   schedule:
-    - cron: '15 3 * * *'   # 10:15 น. ไทย
-    - cron: '45 9 * * *'   # 16:45 น. ไทย
-    - cron: '15 15 * * *'  # 22:15 น. ไทย
-    - cron: '15 21 * * *'  # 04:15 น. ไทย
+    # 🇹🇭 ตลาดหุ้นไทย (เวลา UTC +7)
+    - cron: '15 5 * * 1-5'   # 12:15 น. ไทย (พักเที่ยง - เช็คเทรนด์รอบเช้า)
+    - cron: '15 9 * * 1-5'   # 16:15 น. ไทย (สไนเปอร์: ก่อนตลาดปิด 15 นาที)
+    
+    # 🇺🇸 ตลาดหุ้นอเมริกา (เวลา UTC +7)
+    - cron: '15 15 * * 1-5'  # 22:15 น. ไทย (ตลาดเปิดมาแล้ว 45 นาที - เช็คเทรนด์)
+    - cron: '45 20 * * 1-5'  # 03:45 น. ไทย (สไนเปอร์: ก่อนตลาดปิด 15 นาที)
   workflow_dispatch:
 
 jobs:
@@ -30,5 +33,21 @@ jobs:
           TEST_MODE: ${{ secrets.TEST_MODE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 1. อัปเดตรายชื่อหุ้นใหม่เข้า Database ทุกครั้ง
           python 01_scraper.py
-          python 02_monitor.py
+          
+          # 2. เช็คเวลาเพื่อแยกรันตลาด (แปลงเป็นเวลาไทย +7)
+          HOUR=$(TZ='Asia/Bangkok' date +%H)
+          
+          if [ "$HOUR" == "12" ] || [ "$HOUR" == "16" ]; then
+            echo "🇹🇭 Scanning THAI Market..."
+            python 02_monitor.py TH
+          
+          elif [ "$HOUR" == "22" ] || [ "$HOUR" == "03" ]; then
+            echo "🇺🇸 Scanning US Market..."
+            python 02_monitor.py US
+          
+          else
+            echo "🌍 Scanning ALL Markets (Fallback)..."
+            python 02_monitor.py ALL
+          fi
