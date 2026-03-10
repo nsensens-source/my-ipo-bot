@@ -23,11 +23,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install requests playwright yfinance supabase pandas lxml
-      - name: Cache playwright
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-        key: playwright
+          playwright install chromium
 
       - name: Execute System
         env:
@@ -40,25 +36,25 @@ jobs:
           # 1. อัปเดตรายชื่อหุ้นใหม่เข้า Database ทุกครั้ง
           python 01_scraper.py
           
-          # 2. เช็คเวลา กทม. เพื่อกรองว่าเป็นรอบของฝั่งไหน
-          BKK_HOUR=$(TZ='Asia/Bangkok' date +%H)
+          # 2. ดึงเวลาปัจจุบันของแต่ละโซน (ใช้ %-H เพื่อลบเลข 0 นำหน้า ป้องกันบั๊กใน Bash)
+          BKK_HOUR=$(TZ='Asia/Bangkok' date +%-H)
+          NY_HOUR=$(TZ='America/New_York' date +%-H)
           
-          # 🧩 แบ่งรอบแบบ เหมากลางวัน (ไทย) vs เหมากลางคืน (อเมริกา)
-          if [[ "06 07 08 09 10 11 12 13 14 15 16 17 18" =~ "$BKK_HOUR" ]]; then
-            echo "🇹🇭 Scanning THAI Market (Daytime)..."
+          # ปริ้นท์เวลาออกมาดูเพื่อง่ายต่อการ Debug
+          echo "⏰ BKK Hour: $BKK_HOUR"
+          echo "🗽 NY Hour: $NY_HOUR"
+          echo "---------------------------------"
+          
+          # 🇹🇭 Thai Market: เช็คเวลาไทย 10:00 - 16:59
+          if [ "$BKK_HOUR" -ge 10 ] && [ "$BKK_HOUR" -le 16 ]; then
+            echo "🇹🇭 Scanning THAI Market..."
             python 02_monitor.py TH
-          
-          else
-            # 🗽 โซนกลางคืน: ดึงเวลานิวยอร์ก (จัดการ Summer/Winter อัตโนมัติ)
-            NY_HOUR=$(TZ='America/New_York' date +%H)
-            echo "🗽 Current New York Hour is: $NY_HOUR"
             
-            # ตลาด US เปิด 09:30 - 16:00 (นิวยอร์ก)
-            # เราจะให้รันเฉพาะชั่วโมง 09 ถึง 15 (หยุดรันหลังบ่าย 3 นิวยอร์ก เพื่อให้นอนพักผ่อน)
-            if [[ "09 10 11 12 13 14 15" =~ "$NY_HOUR" ]]; then
-              echo "🇺🇸 Market is OPEN! Scanning US Market..."
-              python 02_monitor.py US
-            else
-              echo "💤 US Market is outside target hours (or user is sleeping). Skipping scan."
-            fi
+          # 🇺🇸 US Market: เช็คเวลานิวยอร์ก 09:00 - 15:59 (จัดการ Summer/Winter Auto)
+          elif [ "$NY_HOUR" -ge 9 ] && [ "$NY_HOUR" -le 15 ]; then
+            echo "🇺🇸 Scanning US Market..."
+            python 02_monitor.py US
+            
+          else
+            echo "💤 Market closed (or outside scanning hours). Skipping scan."
           fi
