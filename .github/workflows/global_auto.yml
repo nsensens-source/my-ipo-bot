@@ -23,7 +23,11 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install requests playwright yfinance supabase pandas lxml
-          playwright install chromium
+      - name: Cache playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+        key: playwright
 
       - name: Execute System
         env:
