@@ -30,6 +30,6 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          DISCORD_WEBHOOK_FAVOURITE: ${{ secrets.DISCORD_WEBHOOK_TOPMOVER }}
+          DISCORD_WEBHOOK_TOPMOVER: ${{ secrets.DISCORD_WEBHOOK_TOPMOVER }}
           TEST_MODE: ${{ secrets.TEST_MODE }}
         run: python 03_top_movers.py
