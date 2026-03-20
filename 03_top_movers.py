@@ -4,7 +4,7 @@ import os
 import sys
 
 # --- ⚙️ CONFIG ---
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK")
+DISCORD_URL = os.getenv("DISCORD_WEBHOOK_TOPMOVER")
 
 def get_most_active(region="US", count=100):
     """ดึงหุ้นที่มีความเคลื่อนไหวสูงสุดจาก Yahoo Finance"""
