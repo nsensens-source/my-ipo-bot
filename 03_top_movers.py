@@ -7,7 +7,7 @@ from io import StringIO
 # --- ⚙️ CONFIG ---
 # ดึงจาก Environment ของ GitHub ถ้าไม่มีให้ใส่ URL ตรงๆ ในเครื่องหมายคำพูดด้านล่าง
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK_TOPMOVER")
-def get_most_active(region="US", count=100):
+def get_most_active(region="US", count=200):
     """ดึงหุ้นที่มีความเคลื่อนไหวสูงสุดจาก Yahoo Finance"""
     print(f"🌐 Fetching Top {count} Most Active stocks for {region}...")
     
