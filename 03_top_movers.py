@@ -5,77 +5,93 @@ import sys
 from io import StringIO
 import re
 
-# --- ⚙️ CONFIG ---
+# --- ⚙️ Igenamiteranyirizo (Configuration) ---
+# Kohereza kuri Discord ukoresheje Webhook
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK_TOPMOVER")
 
 def clean_ticker(raw_ticker):
     """
-    🧩 ฟังก์ชันล้างชื่อหุ้น: กำจัดตัวอักษรขยะ เช่น 'P PLUG' -> 'PLUG'
-    หรือ 'M MARA' -> 'MARA' ที่เกิดจากการดึงปุ่ม Follow ในหน้าเว็บมาด้วย
+    🧩 Gukora isuku kuri Ticker: Kuraho inyuguti z'ikosa nka 'P PLUG' -> 'PLUG'
     """
     if not isinstance(raw_ticker, str):
         return str(raw_ticker)
     
-    # แยกคำด้วยช่องว่าง แล้วเอาคำสุดท้าย
+    # Gukata inyuguti dukoresheje umwanya (space)
     parts = raw_ticker.split()
     clean_name = parts[-1] if parts else raw_ticker
     
-    # ล้างตัวอักษรที่ไม่ใช่ A-Z หรือตัวเลข หรือจุด (.)
+    # Kuraho ibimenyetso bidasanzwe
     clean_name = re.sub(r'[^A-Z0-9.]', '', clean_name.upper())
     return clean_name
 
 def get_most_active(region="US", count=100):
-    """ดึงหุ้นที่มีความเคลื่อนไหวสูงสุดแบบเจาะจงภูมิภาค"""
-    print(f"🌐 Fetching Top {count} for {region}...")
+    """
+    🌐 Gushaka imigabane ikora cyane kurusha iyindi kuri Yahoo Finance
+    """
+    print(f"🌐 Gushaka imigabane {count} ya mbere kuri {region}...")
     
-    # 🧩 เปลี่ยน URL เป็น Screener ที่ระบุภูมิภาคชัดเจน
+    # 🧩 Hitamo URL ijyanye n'isoko ryifuzwa
     if region == "TH":
-        # เจาะจงภูมิภาค TH (SET)
+        # Plan A: Screener ya Thailand
         url = "https://finance.yahoo.com/screener/predefined/most_actives?count=25&offset=0&region=TH"
         limit = 20
     else:
-        # เจาะจงภูมิภาค US
         url = f"https://finance.yahoo.com/screener/predefined/most_actives?count={count}&offset=0&region=US"
         limit = count
 
     try:
         header = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://finance.yahoo.com/"
         }
-        res = requests.get(url, headers=header, timeout=20)
         
-        # ใช้ StringIO ห่อ HTML
+        res = requests.get(url, headers=header, timeout=20)
         html_data = StringIO(res.text)
         tables = pd.read_html(html_data)
         
         if not tables:
-            print(f"⚠️ No tables found for {region}")
             return []
             
         df = tables[0]
-        
-        # ดึงรายชื่อมาล้างขยะทีละตัว
         raw_tickers = df['Symbol'].head(limit).tolist()
         clean_tickers = [clean_ticker(t) for t in raw_tickers if t]
         
-        # 🧩 Double Check ตลาดไทย: ถ้าสั่ง TH แต่ไม่มีตัวไหนลงท้ายด้วย .BK เลย แสดงว่าโดน Redirect
+        # 🧩 Kugenzura niba isoko rya Thailand ryatanze ibisubizo byo muri US (Redirect)
         if region == "TH" and not any(".BK" in t for t in clean_tickers):
-            print(f"❌ Error: Yahoo redirected TH request to US. Attempting fallback...")
+            print("❌ Ikosa: Yahoo yohereje imigabane ya US aho kuba TH. Geregeza Plan B...")
+            
+            # Plan B: Fallback URL ijyanye n'isoko rya Thailand ryonyine
+            fallback_url = "https://finance.yahoo.com/markets/stocks/most-active/?region=th"
+            res = requests.get(fallback_url, headers=header, timeout=20)
+            tables = pd.read_html(StringIO(res.text))
+            
+            if tables:
+                df = tables[0]
+                raw_tickers = df['Symbol'].head(limit).tolist()
+                clean_tickers = [clean_ticker(t) for t in raw_tickers if t]
+                
+                if any(".BK" in t for t in clean_tickers):
+                    print("✅ Plan B yagenze neza!")
+                    return clean_tickers
+            
             return []
 
         return clean_tickers
     except Exception as e:
-        print(f"❌ Error fetching {region}: {e}")
+        print(f"❌ Ikosa ryabonetse: {e}")
         return []
 
 def send_to_discord(tickers, market_name):
+    """
+    📤 Kohereza amakuru kuri Discord
+    """
     if not tickers: 
-        print(f"⚠️ No data for {market_name}. Skipping.")
+        print(f"⚠️ Nta makuru ahari kuri {market_name}. Gusimbuka.")
         return
     
     if not DISCORD_URL or DISCORD_URL == "None":
-        print("❌ Error: DISCORD_WEBHOOK_TOPMOVER is missing!")
+        print("❌ Ikosa: DISCORD_WEBHOOK_TOPMOVER ntabwo yateguwe!")
         return
         
     ticker_str = "\n".join(tickers)
@@ -86,20 +102,20 @@ def send_to_discord(tickers, market_name):
     try:
         res = requests.post(DISCORD_URL, json=msg)
         if res.status_code in [200, 204]:
-            print(f"✅ Sent {market_name} to Discord.")
+            print(f"✅ Byoherejwe kuri Discord ({market_name}).")
     except: pass
 
 if __name__ == "__main__":
-    # รันทั้งสองตลาดถ้าไม่มีระบุมา
-    print("🚀 Running Top Movers Scanner...")
+    print("🚀 Gutangira gushaka imigabane...")
     
-    # TH Market
+    # Isoko rya Thailand (TH)
     th_list = get_most_active("TH", 20)
     if th_list:
         send_to_discord(th_list, "🇹🇭 THAI MARKET (TOP 20)")
     else:
-        print("⚠️ Failed to get TH stocks (Redirect issue).")
+        print("⚠️ Ntibishoboye kubona imigabane ya TH (Redirect issue).")
         
-    # US Market
+    # Isoko rya US
     us_list = get_most_active("US", 100)
-    send_to_discord(us_list, "🇺🇸 US MARKET (TOP 100)")
+    if us_list:
+        send_to_discord(us_list, "🇺🇸 US MARKET (TOP 100)")
