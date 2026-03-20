@@ -1,7 +1,7 @@
-name: Favourite Sniper Bot2
+name: Top Movers Scanner Bot  # 👈 เพิ่มบรรทัดนี้ หรือแก้ไขชื่อตรงนี้
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # สำหรับกดรันด้วยมือ
 
 jobs:
   run-bot:
