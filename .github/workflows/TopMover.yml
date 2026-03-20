@@ -1,4 +1,4 @@
-name: TOPMOVER
+name: Favourite Sniper Bot2
 
 on:
   workflow_dispatch:
