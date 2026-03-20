@@ -3,98 +3,103 @@ import pandas as pd
 import os
 import sys
 from io import StringIO
+import re
 
 # --- ⚙️ CONFIG ---
-# ดึง Discord Webhook จาก Environment Variable
 DISCORD_URL = os.getenv("DISCORD_WEBHOOK_TOPMOVER")
 
-def get_most_active(region="US", count=100):
-    """ดึงข้อมูลหุ้นที่มีความเคลื่อนไหวสูงสุดจาก Yahoo Finance"""
-    print(f"🌐 กำลังดึงข้อมูล Top {count} สำหรับตลาด {region}...")
+def clean_ticker(raw_ticker):
+    """
+    🧩 ฟังก์ชันล้างชื่อหุ้น: กำจัดตัวอักษรขยะ เช่น 'P PLUG' -> 'PLUG'
+    หรือ 'M MARA' -> 'MARA' ที่เกิดจากการดึงปุ่ม Follow ในหน้าเว็บมาด้วย
+    """
+    if not isinstance(raw_ticker, str):
+        return str(raw_ticker)
     
-    # 🧩 ปรับปรุง URL: ใช้ Screener URL แทน Most-Active ทั่วไป เพื่อความแม่นยำของภูมิภาค
+    # แยกคำด้วยช่องว่าง แล้วเอาคำสุดท้าย
+    parts = raw_ticker.split()
+    clean_name = parts[-1] if parts else raw_ticker
+    
+    # ล้างตัวอักษรที่ไม่ใช่ A-Z หรือตัวเลข หรือจุด (.)
+    clean_name = re.sub(r'[^A-Z0-9.]', '', clean_name.upper())
+    return clean_name
+
+def get_most_active(region="US", count=100):
+    """ดึงหุ้นที่มีความเคลื่อนไหวสูงสุดแบบเจาะจงภูมิภาค"""
+    print(f"🌐 Fetching Top {count} for {region}...")
+    
+    # 🧩 เปลี่ยน URL เป็น Screener ที่ระบุภูมิภาคชัดเจน
     if region == "TH":
-        # URL สำหรับตลาดหุ้นไทยโดยเฉพาะ (SET)
-        url = "https://finance.yahoo.com/screener/predefined/most_actives?offset=0&count=25&dependent=it&region=TH"
+        # เจาะจงภูมิภาค TH (SET)
+        url = "https://finance.yahoo.com/screener/predefined/most_actives?count=25&offset=0&region=TH"
         limit = 20
     else:
-        # URL สำหรับตลาดหุ้น US
-        url = f"https://finance.yahoo.com/screener/predefined/most_actives?offset=0&count={count}"
+        # เจาะจงภูมิภาค US
+        url = f"https://finance.yahoo.com/screener/predefined/most_actives?count={count}&offset=0&region=US"
         limit = count
 
     try:
         header = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9"
         }
-        res = requests.get(url, headers=header, timeout=15)
+        res = requests.get(url, headers=header, timeout=20)
         
-        # ใช้ StringIO ห่อ HTML string ตามคำแนะนำของ Pandas
+        # ใช้ StringIO ห่อ HTML
         html_data = StringIO(res.text)
         tables = pd.read_html(html_data)
         
         if not tables:
-            print(f"⚠️ ไม่พบตารางข้อมูลสำหรับ {region}")
+            print(f"⚠️ No tables found for {region}")
             return []
             
         df = tables[0]
         
-        # ดึงรายชื่อหุ้น
-        tickers = df['Symbol'].head(limit).tolist()
-
-        # 🧩 Double Check: ถ้าเป็นตลาด TH แต่ไม่มีหุ้นตัวไหนลงท้ายด้วย .BK เลย 
-        # แสดงว่า Yahoo ดีดเรากลับไปหน้า US ให้ส่งค่าว่างกลับไปเพื่อไม่ให้ข้อมูลผิดพลาด
-        if region == "TH" and not any(".BK" in str(t) for t in tickers):
-            print(f"❌ ตรวจพบความผิดพลาด: ระบบดึงหุ้น US มาแทนที่ TH (กำลังลองดึงใหม่...)")
+        # ดึงรายชื่อมาล้างขยะทีละตัว
+        raw_tickers = df['Symbol'].head(limit).tolist()
+        clean_tickers = [clean_ticker(t) for t in raw_tickers if t]
+        
+        # 🧩 Double Check ตลาดไทย: ถ้าสั่ง TH แต่ไม่มีตัวไหนลงท้ายด้วย .BK เลย แสดงว่าโดน Redirect
+        if region == "TH" and not any(".BK" in t for t in clean_tickers):
+            print(f"❌ Error: Yahoo redirected TH request to US. Attempting fallback...")
             return []
 
-        return tickers
+        return clean_tickers
     except Exception as e:
-        print(f"❌ เกิดข้อผิดพลาดในการดึงข้อมูล {region}: {e}")
+        print(f"❌ Error fetching {region}: {e}")
         return []
 
 def send_to_discord(tickers, market_name):
-    """ส่งรายชื่อหุ้นไปยัง Discord"""
     if not tickers: 
-        print(f"⚠️ ไม่มีข้อมูลหุ้นสำหรับ {market_name} (ข้ามการส่ง)")
+        print(f"⚠️ No data for {market_name}. Skipping.")
         return
     
     if not DISCORD_URL or DISCORD_URL == "None":
-        print("❌ Error: ไม่ได้ตั้งค่า DISCORD_WEBHOOK_TOPMOVER ในระบบ!")
+        print("❌ Error: DISCORD_WEBHOOK_TOPMOVER is missing!")
         return
         
     ticker_str = "\n".join(tickers)
     msg = {
-        "content": f"🏆 **TOP MOVERS: {market_name}**\nพบหุ้นที่มีความเคลื่อนไหวสูงสุด {len(tickers)} อันดับแรก\n```text\n{ticker_str}\n```"
+        "content": f"🏆 **TOP MOVERS: {market_name}**\n```text\n{ticker_str}\n```"
     }
     
     try:
         res = requests.post(DISCORD_URL, json=msg)
         if res.status_code in [200, 204]:
-            print(f"✅ ส่งข้อมูล {market_name} ไปยัง Discord เรียบร้อย")
-        else:
-            print(f"❌ Discord Error: {res.status_code} - {res.text}")
-    except Exception as e:
-        print(f"❌ ไม่สามารถส่งข้อมูลไปยัง Discord ได้: {e}")
+            print(f"✅ Sent {market_name} to Discord.")
+    except: pass
 
 if __name__ == "__main__":
-    # ตรวจสอบอาร์กิวเมนต์ที่ส่งมา
-    if len(sys.argv) > 1:
-        market = sys.argv[1].upper()
-        if market == "TH":
-            top_list = get_most_active("TH", 20)
-            send_to_discord(top_list, "🇹🇭 THAI MARKET (TOP 20)")
-        elif market == "US":
-            top_list = get_most_active("US", 100)
-            send_to_discord(top_list, "🇺🇸 US MARKET (TOP 100)")
-    else:
-        # หากไม่ระบุ ให้รันทั้งไทยและ US
-        print("🚀 ไม่ได้ระบุตลาด กำลังเริ่มดึงข้อมูลทั้ง TH และ US...")
-        
-        # รันไทยก่อน
-        th_list = get_most_active("TH", 20)
+    # รันทั้งสองตลาดถ้าไม่มีระบุมา
+    print("🚀 Running Top Movers Scanner...")
+    
+    # TH Market
+    th_list = get_most_active("TH", 20)
+    if th_list:
         send_to_discord(th_list, "🇹🇭 THAI MARKET (TOP 20)")
+    else:
+        print("⚠️ Failed to get TH stocks (Redirect issue).")
         
-        # รัน US ต่อ
-        us_list = get_most_active("US", 100)
-        send_to_discord(us_list, "🇺🇸 US MARKET (TOP 100)")
+    # US Market
+    us_list = get_most_active("US", 100)
+    send_to_discord(us_list, "🇺🇸 US MARKET (TOP 100)")
