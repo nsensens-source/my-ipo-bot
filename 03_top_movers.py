@@ -72,4 +72,3 @@ if __name__ == "__main__":
     else:
         top_list = get_most_active("US", 100)
         send_to_discord(top_list, "🇺🇸 US MARKET (TOP 100)")
-```
