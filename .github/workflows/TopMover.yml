@@ -1,89 +1,59 @@
-import requests
-import pandas as pd
-import os
-import sys
-from io import StringIO
+name: TOPMOVER
 
-# --- ⚙️ CONFIG ---
-# ดึงจาก Environment ของ GitHub ถ้าไม่มีให้ใส่ URL ตรงๆ ในเครื่องหมายคำพูดด้านล่าง
-DISCORD_URL = os.getenv("DISCORD_WEBHOOK_TOPMOVER") or "ใส่_URL_Webhook_ของคุณที่นี่_ถ้าจะรันในเครื่องตัวเอง"
+on:
+  workflow_dispatch:
 
-def get_most_active(region="US", count=100):
-    """ดึงหุ้นที่มีความเคลื่อนไหวสูงสุดจาก Yahoo Finance"""
-    print(f"🌐 Fetching Top {count} Most Active stocks for {region}...")
-    
-    if region == "TH":
-        url = "https://finance.yahoo.com/markets/stocks/most-active/?dependent=it&region=TH"
-        limit = 20
-    else:
-        url = f"https://finance.yahoo.com/markets/stocks/most-active/?start=0&count={count}"
-        limit = count
-
-    try:
-        header = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-        res = requests.get(url, headers=header, timeout=15)
-        
-        # ✅ แก้ไข FutureWarning: ใช้ StringIO ตามที่ Pandas แนะนำ
-        html_data = StringIO(res.text)
-        tables = pd.read_html(html_data)
-        
-        if not tables:
-            print(f"⚠️ No tables found for {region}")
-            return []
-            
-        df = tables[0]
-        tickers = df['Symbol'].head(limit).tolist()
-        return tickers
-    except Exception as e:
-        print(f"❌ Error fetching {region} movers: {e}")
-        return []
-
-def send_to_discord(tickers, market_name):
-    if not tickers: 
-        print(f"⚠️ No tickers to send for {market_name}")
-        return
-    
-    if not DISCORD_URL or DISCORD_URL == "None":
-        print("❌ Error: DISCORD_WEBHOOK is not defined!")
-        return
-        
-    ticker_str = "\n".join(tickers)
-    msg = {
-        "content": f"🏆 **TOP MOVERS: {market_name}**\nพบหุ้นที่มีความเคลื่อนไหวสูงสุด {len(tickers)} อันดับแรก\n```text\n{ticker_str}\n```"
-    }
-    
-    try:
-        res = requests.post(DISCORD_URL, json=msg)
-        if res.status_code == 204:
-            print(f"✅ Successfully sent {market_name} to Discord.")
-        else:
-            print(f"❌ Discord error: {res.status_code}")
-    except Exception as e:
-        print(f"❌ Failed to send to Discord: {e}")
-
-if __name__ == "__main__":
-    market = sys.argv[1].upper() if len(sys.argv) > 1 else "US"
-    
-    if market == "TH":
-        top_list = get_most_active("TH", 20)
-        send_to_discord(top_list, "🇹🇭 THAI MARKET (TOP 20)")
-    else:
-        top_list = get_most_active("US", 100)
-        send_to_discord(top_list, "🇺🇸 US MARKET (TOP 100)")
-```
-
----
-
-### 🧩 สิ่งที่ต้องตรวจสอบในไฟล์ `global_auto.yml`
-
-เพื่อให้มั่นใจว่าเวลาคุณกด **Manual Run** แล้วค่า Webhook จะถูกส่งไปที่ Python จริงๆ รบกวนตรวจสอบส่วน `env:` ในไฟล์ YML ของคุณว่ามีบรรทัด `DISCORD_WEBHOOK` อยู่ภายใต้ขั้นตอนที่รันไฟล์นี้หรือไม่ครับ:
-
-```yaml
-      - name: Execute Top Movers
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_TOPMOVER }} # 👈 ห้ามลืมบรรทัดนี้เด็ดขาด!
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      # 🧩 ดึง Cache ของ Playwright (Chromium) มาใช้เพื่อความรวดเร็ว
+      - name: Cache Playwright Browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright
+      
+      - name: Install Dependencies
         run: |
-          python 03_top_movers.py TH
-          python 03_top_movers.py US
+          pip install requests playwright yfinance supabase pandas lxml
+          # ถ้ามี Cache อยู่แล้ว คำสั่งนี้จะทำงานเสร็จไวมาก (ไม่โหลดใหม่)
+          playwright install chromium
+
+      - name: Execute System
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_TOPMOVER }}
+          TEST_MODE: ${{ secrets.TEST_MODE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+                 
+          # 2. ดึงเวลาปัจจุบันของแต่ละโซน (ใช้ %-H เพื่อลบเลข 0 นำหน้า ป้องกันบั๊กใน Bash)
+          BKK_HOUR=$(TZ='Asia/Bangkok' date +%-H)
+          NY_HOUR=$(TZ='America/New_York' date +%-H)
+          
+          # ปริ้นท์เวลาออกมาดูเพื่อง่ายต่อการ Debug
+          echo "⏰ BKK Hour: $BKK_HOUR"
+          echo "🗽 NY Hour: $NY_HOUR"
+          echo "---------------------------------"
+          
+          # 🇹🇭 Thai Market: เช็คเวลาไทย 10:00 - 16:59
+          if [ "$BKK_HOUR" -ge 10 ] && [ "$BKK_HOUR" -le 16 ]; then
+            echo "🇹🇭 Scanning THAI Market..."
+            python 03_top_movers.py TH
+            
+          # 🇺🇸 US Market: เช็คเวลานิวยอร์ก 09:00 - 15:59 (จัดการ Summer/Winter Auto)
+          elif [ "$NY_HOUR" -ge 9 ] && [ "$NY_HOUR" -le 15 ]; then
+            echo "🇺🇸 Scanning US Market..."
+            python 03_top_movers.py US
+            
+          else
+            echo "💤 Market closed (or outside scanning hours). Skipping scan."
+          fi
