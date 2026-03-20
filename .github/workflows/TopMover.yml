@@ -32,27 +32,5 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_TOPMOVER }}
           TEST_MODE: ${{ secrets.TEST_MODE }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          
-          # 2. ดึงเวลาปัจจุบันของแต่ละโซน (ใช้ %-H เพื่อลบเลข 0 นำหน้า ป้องกันบั๊กใน Bash)
-          BKK_HOUR=$(TZ='Asia/Bangkok' date +%-H)
-          NY_HOUR=$(TZ='America/New_York' date +%-H)
-          
-          # ปริ้นท์เวลาออกมาดูเพื่อง่ายต่อการ Debug
-          echo "⏰ BKK Hour: $BKK_HOUR"
-          echo "🗽 NY Hour: $NY_HOUR"
-          echo "---------------------------------"
-          
-          # 🇹🇭 Thai Market: เช็คเวลาไทย 10:00 - 16:59
-          if [ "$BKK_HOUR" -ge 10 ] && [ "$BKK_HOUR" -le 16 ]; then
-            echo "🇹🇭 Scanning THAI Market..."
-            python 03_top_movers.py TH
-            
-          # 🇺🇸 US Market: เช็คเวลานิวยอร์ก 09:00 - 15:59 (จัดการ Summer/Winter Auto)
-          elif [ "$NY_HOUR" -ge 9 ] && [ "$NY_HOUR" -le 15 ]; then
-            echo "🇺🇸 Scanning US Market..."
-            python 03_top_movers.py US
-            
-          else
-            echo "💤 Market closed (or outside scanning hours). Skipping scan."
-          fi
+        run: 03_top_movers.py
+         
