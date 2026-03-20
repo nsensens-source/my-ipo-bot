@@ -69,5 +69,5 @@ if __name__ == "__main__":
         top_list = get_most_active("TH", 20)
         send_to_discord(top_list, "🇹🇭 THAI MARKET (TOP 20)")
     else:
-        top_list = get_most_active("US", 100)
-        send_to_discord(top_list, "🇺🇸 US MARKET (TOP 100)")
+        top_list = get_most_active("US", 200)
+        send_to_discord(top_list, "🇺🇸 US MARKET (TOP 200)")
