@@ -3,31 +3,46 @@ import pandas as pd
 import requests
 import os
 import time
+import logging
 
-# 1. ดึงค่า Webhook
-DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5'
+# ปิดการแจ้งเตือนขยะจาก yfinance
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
+# ดึงค่า Webhook
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
 
 # --- ตั้งค่าตัวกรองหุ้น (Filters) ---
-MIN_PRICE = 3.0           # ราคาขั้นต่ำ 3 ดอลลาร์ (ตัดหุ้นปั่น/Penny Stocks)
-MIN_DOLLAR_VOLUME = 15_000_000  # มูลค่าซื้อขายขั้นต่ำ 15 ล้านดอลลาร์/วัน (ตัดหุ้นไร้สภาพคล่อง)
+MIN_PRICE = 3.0           # ราคาขั้นต่ำ 3 ดอลลาร์
+MIN_DOLLAR_VOLUME = 15_000_000  # มูลค่าซื้อขายขั้นต่ำ 15 ล้านดอลลาร์/วัน
+# ใส่ชื่อหุ้นหรือ ETF ที่อยากบังคับให้ระบบเช็คเสมอ (เช่น QQQ, SPY)
+CUSTOM_WATCHLIST = ['SPY', 'QQQ', 'DIA'] 
 
 def get_all_us_tickers():
-    """ดึงรายชื่อหุ้นทั้งหมดที่จดทะเบียนใน ก.ล.ต. สหรัฐฯ (SEC)"""
-    # SEC บังคับให้ใส่ User-Agent เป็นรูปแบบ ชื่อ/อีเมล
+    """ดึงรายชื่อหุ้นจาก SEC + S&P 500 + Watchlist เพื่อให้ครบถ้วนที่สุด"""
+    valid_tickers = set(CUSTOM_WATCHLIST)
+    
+    # 1. ดึงจาก SEC (ครอบคลุมทั้งตลาด)
     headers = {'User-Agent': 'US_Stock_Scanner user@example.com'}
     url = "https://www.sec.gov/files/company_tickers.json"
-    
     try:
         response = requests.get(url, headers=headers)
-        data = response.json()
-        # ดึงแค่สัญลักษณ์หุ้น และแปลง . เป็น - สำหรับ yfinance (เช่น BRK.B -> BRK-B)
-        tickers = [item['ticker'].replace('.', '-') for item in data.values()]
-        # ตัดตัวซ้ำ
-        return list(set(tickers))
+        for item in response.json().values():
+            ticker = item['ticker'].replace('.', '-')
+            if len(ticker) <= 4 or '-' in ticker:
+                valid_tickers.add(ticker)
     except Exception as e:
-        print(f"Error fetching from SEC: {e}")
-        return []
+        print(f"SEC Fetch Error: {e}")
+
+    # 2. ดึงจาก S&P 500 (กันเหนียวเผื่อ SEC ตกหล่น)
+    try:
+        wiki_url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        df = pd.read_html(requests.get(wiki_url, headers={'User-Agent': 'Mozilla/5.0'}).text)[0]
+        sp500 = df['Symbol'].str.replace('.', '-', regex=False).tolist()
+        valid_tickers.update(sp500)
+    except:
+        pass
+        
+    return list(valid_tickers)
 
 def format_pct(current, previous):
     """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง"""
@@ -37,82 +52,86 @@ def format_pct(current, previous):
     return f"{emoji}{abs(diff):.1f}%"
 
 def main():
-    print("🚀 เริ่มสแกนหุ้นทั้งตลาดสหรัฐฯ (Market-Wide Scan)...")
+    print("🚀 เริ่มสแกนหุ้นทั้งตลาดสหรัฐฯ (Batch Processing)...")
     tickers = get_all_us_tickers()
     
     if not tickers:
-        print("ไม่สามารถดึงรายชื่อหุ้นจาก SEC ได้")
+        print("ไม่สามารถดึงรายชื่อหุ้นได้")
         return
         
-    print(f"พบรายชื่อหุ้นในระบบทั้งหมด {len(tickers)} ตัว")
-    print("กำลังดาวน์โหลดข้อมูลราคาย้อนหลัง (อาจใช้เวลา 1-3 นาที)...")
-
-    # ดาวน์โหลดแบบ Batch ทีเดียวทั้งตลาด (เร็วที่สุด)
-    data = yf.download(tickers, period="12d", interval="1d", threads=True)
-    
-    # แยก DataFrame ของราคาปิดและ Volume เพื่อง่ายต่อการคำนวณ
-    close_data = data['Close']
-    volume_data = data['Volume']
+    print(f"พบรายชื่อหุ้นทั้งหมด {len(tickers)} ตัว")
+    print("กำลังดาวน์โหลดข้อมูล (แบ่งเป็นรอบๆ เพื่อป้องกันข้อมูลตกหล่น)...")
 
     results = []
+    chunk_size = 500 # แบ่งดาวน์โหลดรอบละ 500 ตัว
     
-    # วนลูปเช็คหุ้นทุกตัว
-    for ticker in close_data.columns:
-        try:
-            h_close = close_data[ticker].dropna()
-            h_vol = volume_data[ticker].dropna()
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i + chunk_size]
+        
+        # ป้องกันบั๊กของ yfinance เมื่อดาวน์โหลดหุ้นแค่ตัวเดียว
+        if len(chunk) == 1: chunk.append('AAPL')
+
+        # ดาวน์โหลดข้อมูลทีละกลุ่ม
+        data = yf.download(chunk, period="12d", interval="1d", threads=True, progress=False, show_errors=False)
+        
+        if 'Close' not in data: continue
             
-            if len(h_close) < 6 or len(h_vol) < 1: 
+        close_data = data['Close']
+        volume_data = data['Volume']
+        
+        for ticker in chunk:
+            try:
+                if ticker not in close_data: continue
+                
+                h_close = close_data[ticker].dropna()
+                h_vol = volume_data[ticker].dropna()
+                
+                if len(h_close) < 6 or len(h_vol) < 1: continue
+                    
+                curr_price = h_close.iloc[-1]
+                prev_price = h_close.iloc[-2]
+                curr_vol = h_vol.iloc[-1]
+                
+                # --- 🛡️ FILTER LOGIC ---
+                if curr_price < MIN_PRICE: continue
+                    
+                dollar_vol = curr_price * curr_vol
+                if dollar_vol < MIN_DOLLAR_VOLUME: continue
+                # ------------------------
+                
+                today_pct_val = ((curr_price - prev_price) / prev_price) * 100
+                
+                d1 = format_pct(h_close.iloc[-2], h_close.iloc[-3])
+                d2 = format_pct(h_close.iloc[-3], h_close.iloc[-4])
+                d3 = format_pct(h_close.iloc[-4], h_close.iloc[-5])
+                d4 = format_pct(h_close.iloc[-5], h_close.iloc[-6])
+                
+                results.append({
+                    'Ticker': ticker,
+                    'Price': curr_price,
+                    'Today': format_pct(curr_price, prev_price),
+                    'SortVal': today_pct_val,
+                    'History': f"{d1} {d2} {d3} {d4}"
+                })
+            except Exception:
                 continue
                 
-            curr_price = h_close.iloc[-1]
-            prev_price = h_close.iloc[-2]
-            curr_vol = h_vol.iloc[-1]
-            
-            # --- 🛡️ FILTER LOGIC (ระบบคัดกรอง) 🛡️ ---
-            # 1. ถ้าราคาต่ำกว่าที่เราตั้งไว้ ให้ข้ามไปเลย
-            if curr_price < MIN_PRICE:
-                continue
-                
-            # 2. คำนวณมูลค่าการซื้อขาย (Dollar Volume)
-            dollar_vol = curr_price * curr_vol
-            if dollar_vol < MIN_DOLLAR_VOLUME:
-                continue
-            # ----------------------------------------
-            
-            today_pct_val = ((curr_price - prev_price) / prev_price) * 100
-            
-            # คำนวณประวัติ 4 วันก่อนหน้า (Day-1 ถึง Day-4) เรียงจากใหม่ไปเก่า
-            d1 = format_pct(h_close.iloc[-2], h_close.iloc[-3])
-            d2 = format_pct(h_close.iloc[-3], h_close.iloc[-4])
-            d3 = format_pct(h_close.iloc[-4], h_close.iloc[-5])
-            d4 = format_pct(h_close.iloc[-5], h_close.iloc[-6])
-            
-            results.append({
-                'Ticker': ticker,
-                'Price': curr_price,
-                'Today': format_pct(curr_price, prev_price),
-                'SortVal': today_pct_val,
-                'History': f"{d1} {d2} {d3} {d4}",
-                'Vol_M': f"${dollar_vol / 1_000_000:.1f}M" # เก็บค่า Volume ไว้ดูเผื่อวิเคราะห์
-            })
-        except Exception:
-            continue
+        # หยุดพัก 1 วินาที เพื่อไม่ให้ Yahoo บล็อก
+        time.sleep(1)
 
     if not results:
-        print("ไม่พบหุ้นที่ผ่านเกณฑ์การคัดกรอง")
+        print("ไม่พบหุ้นที่ผ่านเกณฑ์")
         return
         
-    # จัดอันดับ Top 50 จากหุ้นที่ผ่านการคัดกรองทั้งหมด
+    # จัดอันดับ Top 50 
     top_50 = pd.DataFrame(results).sort_values(by='SortVal', ascending=False).head(50)
 
-    # ตรวจสอบ Webhook ก่อนส่ง
     if not DISCORD_WEBHOOK_URL:
-        print("Error: ไม่พบ DISCORD_WEBHOOK_TOPGAINER ใน Environment Variables")
+        print("Error: ไม่พบ Webhook URL")
         return
 
     # --- ส่วนของการส่งเข้า Discord ---
-    header = "🎯 **TOP 50 GAINERS (LIQUIDITY FILTERED)** 🎯\n"
+    header = "🎯 **TOP 50 GAINERS (FULL MARKET SCAN)** 🎯\n"
     header += f"*Filter: Price > ${MIN_PRICE}, Vol > ${MIN_DOLLAR_VOLUME/1_000_000}M*\n"
     
     cb = "```" 
