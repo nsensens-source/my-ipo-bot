@@ -5,7 +5,7 @@ import os
 import time
 
 # ดึงค่าจาก GitHub Secrets
-DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
+DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5'
 
 def get_sp500_tickers():
     # แก้ไข URL ให้เป็น string ปกติ ไม่ติด format markdown
