@@ -5,7 +5,8 @@ import os
 import time
 
 # 1. ดึงค่า Webhook
-DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
+DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5'
+
 
 # --- ตั้งค่าตัวกรองหุ้น (Filters) ---
 MIN_PRICE = 3.0           # ราคาขั้นต่ำ 3 ดอลลาร์ (ตัดหุ้นปั่น/Penny Stocks)
