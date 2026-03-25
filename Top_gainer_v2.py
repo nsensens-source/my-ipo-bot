@@ -6,7 +6,7 @@ import os
 
 # แนะนำให้ใช้ GitHub Secrets ในการเก็บ URL เพื่อความปลอดภัย
 # โดยตั้งชื่อ Secret ว่า DISCORD_WEBHOOK
-DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK', 'YOUR_WEBHOOK_URL_HERE')
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
 
 def get_sp500_tickers():
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
@@ -18,7 +18,7 @@ def get_sp500_tickers():
 
 def send_to_discord_chunks(df, title):
     """แบ่งส่งข้อมูลเข้า Discord กลุ่มละ 10-15 ตัว เพื่อไม่ให้ข้อความยาวเกินกำหนด"""
-    if not DISCORD_WEBHOOK_URL or DISCORD_WEBHOOK_URL == 'YOUR_WEBHOOK_URL_HERE':
+    if not DISCORD_WEBHOOK_URL:
         print("Error: Discord Webhook URL not found.")
         return
 
