@@ -14,9 +14,9 @@ DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG
 
 # --- ตั้งค่าตัวกรองหุ้น (Filters) ---
 MIN_PRICE = 3.0           # ราคาขั้นต่ำ 3 ดอลลาร์
-MIN_DOLLAR_VOLUME = 15_000_000  # มูลค่าซื้อขายขั้นต่ำ 15 ล้านดอลลาร์/วัน
-# ใส่ชื่อหุ้นหรือ ETF ที่อยากบังคับให้ระบบเช็คเสมอ (เช่น QQQ, SPY)
-CUSTOM_WATCHLIST = ['SPY', 'QQQ', 'DIA'] 
+MIN_DOLLAR_VOLUME = 15_000_000  # มูลค่าซื้อขายเฉลี่ยขั้นต่ำ 15 ล้านดอลลาร์/วัน
+# ใส่ชื่อหุ้นที่อยากบังคับให้ระบบเช็คเสมอ การันตีไม่ให้ตกหล่น
+CUSTOM_WATCHLIST = ['SPY', 'QQQ', 'DIA', 'AAOI', 'LITE', 'PLTR', 'SOFI', 'ARM'] 
 
 def get_all_us_tickers():
     """ดึงรายชื่อหุ้นจาก SEC + S&P 500 + Watchlist เพื่อให้ครบถ้วนที่สุด"""
@@ -66,7 +66,8 @@ def main():
     print("กำลังดาวน์โหลดข้อมูล (แบ่งเป็นรอบๆ เพื่อป้องกันข้อมูลตกหล่น)...")
 
     results = []
-    chunk_size = 500 # แบ่งดาวน์โหลดรอบละ 500 ตัว
+    # ลดขนาดรอบการดาวน์โหลดเหลือ 200 ตัว เพื่อป้องกัน yfinance แอบตัดหุ้นทิ้งเวลาโหลดเยอะๆ
+    chunk_size = 200 
     
     for i in range(0, len(tickers), chunk_size):
         chunk = tickers[i:i + chunk_size]
@@ -74,7 +75,7 @@ def main():
         # ป้องกันบั๊กของ yfinance เมื่อดาวน์โหลดหุ้นแค่ตัวเดียว
         if len(chunk) == 1: chunk.append('AAPL')
 
-        # ดาวน์โหลดข้อมูลทีละกลุ่ม (เอา show_errors=False ออกเพื่อแก้ TypeError)
+        # ดาวน์โหลดข้อมูลทีละกลุ่ม
         data = yf.download(chunk, period="12d", interval="1d", threads=True, progress=False)
         
         if 'Close' not in data: continue
@@ -89,16 +90,19 @@ def main():
                 h_close = close_data[ticker].dropna()
                 h_vol = volume_data[ticker].dropna()
                 
-                if len(h_close) < 6 or len(h_vol) < 1: continue
+                if len(h_close) < 6 or len(h_vol) < 5: continue
                     
                 curr_price = h_close.iloc[-1]
                 prev_price = h_close.iloc[-2]
-                curr_vol = h_vol.iloc[-1]
+                
+                # ใช้ Volume เฉลี่ย 5 วันย้อนหลัง ป้องกันบั๊กวอลุ่มหายในวันล่าสุด
+                avg_vol_5d = h_vol.tail(5).mean()
                 
                 # --- 🛡️ FILTER LOGIC ---
                 if curr_price < MIN_PRICE: continue
                     
-                dollar_vol = curr_price * curr_vol
+                # คำนวณ Liquidity ด้วย Average Volume แทน
+                dollar_vol = curr_price * avg_vol_5d
                 if dollar_vol < MIN_DOLLAR_VOLUME: continue
                 # ------------------------
                 
@@ -119,8 +123,8 @@ def main():
             except Exception:
                 continue
                 
-        # หยุดพัก 1 วินาที เพื่อไม่ให้ Yahoo บล็อก
-        time.sleep(1)
+        # หยุดพัก 1.5 วินาที เพื่อถนอมการยิง Request
+        time.sleep(1.5)
 
     if not results:
         print("ไม่พบหุ้นที่ผ่านเกณฑ์")
@@ -135,7 +139,7 @@ def main():
 
     # --- ส่วนของการส่งเข้า Discord ---
     header = "🎯 **TOP 50 GAINERS (FULL MARKET SCAN)** 🎯\n"
-    header += f"*Filter: Price > ${MIN_PRICE}, Vol > ${MIN_DOLLAR_VOLUME/1_000_000}M*\n"
+    header += f"*Filter: Price > ${MIN_PRICE}, Avg 5D Vol > ${MIN_DOLLAR_VOLUME/1_000_000}M*\n"
     
     cb = "```" 
     table_header = f"{cb}text\n{'Ticker':<6} | {'Price':<7} | {'Today':<8} | D-1 to D-4 Trend\n"
