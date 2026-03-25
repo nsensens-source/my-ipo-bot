@@ -8,7 +8,8 @@ import time
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
 
 def get_sp500_tickers():
-    url = '[https://en.wikipedia.org/wiki/List_of_S%26P_500_companies](https://en.wikipedia.org/wiki/List_of_S%26P_500_companies)'
+    # แก้ไข URL ให้เป็น string ปกติ ไม่ติด format markdown
+    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers)
