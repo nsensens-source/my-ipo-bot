@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 import os
+import time
 
 # ดึงค่าจาก GitHub Secrets
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
@@ -14,12 +15,12 @@ def get_sp500_tickers():
         df = pd.read_html(response.text)[0]
         return df['Symbol'].str.replace('.', '-', regex=False).tolist()
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error fetching tickers: {e}")
         return []
 
 def format_pct(current, previous):
     """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง"""
-    if previous == 0: return "⚪0.0%"
+    if pd.isna(current) or pd.isna(previous) or previous == 0: return "⚪0.0%"
     diff = ((current - previous) / previous) * 100
     emoji = "🟢" if diff >= 0 else "🔴"
     return f"{emoji}{abs(diff):.1f}%"
@@ -27,9 +28,11 @@ def format_pct(current, previous):
 def main():
     print("🚀 กำลังดึงข้อมูลและคำนวณเทรนด์ 5 วันล่าสุด...")
     tickers = get_sp500_tickers()
-    if not tickers: return
+    if not tickers: 
+        print("ไม่สามารถดึงรายชื่อหุ้นได้")
+        return
 
-    # ดึงข้อมูลย้อนหลัง
+    # ดึงข้อมูลย้อนหลัง 12 วันเพื่อเผื่อวันหยุด
     data = yf.download(tickers, period="12d", interval="1d", group_by='ticker', threads=True)
     
     results = []
@@ -43,7 +46,7 @@ def main():
             prev = h.iloc[-2]
             today_pct_val = ((curr - prev) / prev) * 100
             
-            # คำนวณประวัติ 4 วันก่อนหน้า (Day-1 ถึง Day-4)
+            # คำนวณประวัติ 4 วันก่อนหน้า (Day-1 ถึง Day-4) เรียงจากใหม่ไปเก่า
             d1 = format_pct(h.iloc[-2], h.iloc[-3])
             d2 = format_pct(h.iloc[-3], h.iloc[-4])
             d3 = format_pct(h.iloc[-4], h.iloc[-5])
@@ -56,20 +59,22 @@ def main():
                 'SortVal': today_pct_val,
                 'History': f"{d1} {d2} {d3} {d4}"
             })
-        except: continue
+        except Exception as e:
+            continue
 
     # จัดอันดับ Top 50
+    if not results:
+        print("ไม่มีข้อมูลหุ้นให้แสดงผล")
+        return
+        
     top_50 = pd.DataFrame(results).sort_values(by='SortVal', ascending=False).head(50)
+
+    # ตรวจสอบ Webhook ก่อนส่ง
+    if not DISCORD_WEBHOOK_URL:
+        print("Error: ไม่พบ DISCORD_WEBHOOK_TOPGAINER ใน Environment Variables")
+        print(top_50.head())
+        return
 
     # --- ส่วนของการส่งเข้า Discord ---
     header = "🚀 **TOP 50 US GAINERS (5-DAY TREND %)** 🚀\n"
     table_header = f"
-http://googleusercontent.com/immersive_entry_chip/0
-
----
-
-### โค้ดนี้จะทำงานอย่างไรใน Discord:
-* คุณจะได้เห็นตัวเลขเป็น **% Change ล้วนๆ** ในช่อง History แบบนี้ครับ: `🟢1.2% 🔴0.5% 🟢3.4% 🔴1.1%` 
-* บล็อกข้อความจะถูกต่อกันยาวๆ ไม่ถูกหั่นทีละ 10 บรรทัดอีกต่อไป (มันจะตัดขึ้นก้อนใหม่แค่ตอนที่ข้อความใกล้จะทะลุ 2,000 ตัวอักษร เพื่อไม่ให้บอทพังครับ)
-
-ลองอัปเดตไฟล์ใน GitHub แล้วรันใหม่อีกครั้งดูนะครับ ได้ผลลัพธ์เป็นลูกศรสีเขียวแดงตามที่ตั้งใจไว้หรือยังครับ?
