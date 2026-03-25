@@ -4,7 +4,7 @@ import requests
 import json
 
 # --- ตั้งค่า Webhook ของคุณที่นี่ ---
-DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL_HERE"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5"
 
 def send_to_discord(df):
     """ส่งข้อมูล Top 10 Gainers เข้า Discord ในรูปแบบตารางที่อ่านง่าย"""
