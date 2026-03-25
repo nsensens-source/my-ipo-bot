@@ -8,7 +8,7 @@ import time
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
 
 def get_sp500_tickers():
-    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    url = '[https://en.wikipedia.org/wiki/List_of_S%26P_500_companies](https://en.wikipedia.org/wiki/List_of_S%26P_500_companies)'
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers)
@@ -77,4 +77,40 @@ def main():
 
     # --- ส่วนของการส่งเข้า Discord ---
     header = "🚀 **TOP 50 US GAINERS (5-DAY TREND %)** 🚀\n"
-    table_header = f"
+    
+    # ใช้ตัวแปรแทนเพื่อป้องกันปัญหาระบบตัดข้อความ
+    cb = "```" 
+    table_header = f"{cb}text\n{'Ticker':<6} | {'Price':<7} | {'Today':<8} | D-1 to D-4 Trend\n"
+    table_header += "-" * 60 + "\n"
+    
+    current_msg = header + table_header
+    messages_to_send = []
+
+    for _, row in top_50.iterrows():
+        line = f"{row['Ticker']:<6} | {row['Price']:>7.2f} | {row['Today']:<8} | {row['History']}\n"
+        
+        # เช็คความยาวข้อความไม่ให้เกิน Limit 2000 ตัวอักษรของ Discord
+        if len(current_msg) + len(line) > 1900:
+            current_msg += f"{cb}" # ปิดโค้ดบล็อกก้อนปัจจุบัน
+            messages_to_send.append(current_msg)
+            # เริ่มก้อนใหม่
+            current_msg = f"{cb}text\n" + line 
+        else:
+            current_msg += line
+
+    # เก็บข้อความก้อนสุดท้าย
+    if not current_msg.endswith(f"{cb}"):
+        current_msg += f"{cb}"
+        messages_to_send.append(current_msg)
+
+    # ยิงข้อความเข้า Discord ทีละก้อน
+    for msg in messages_to_send:
+        response = requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
+        if response.status_code not in (200, 204):
+            print(f"Error sending to Discord: {response.status_code} - {response.text}")
+        time.sleep(1) # หน่วงเวลา 1 วินาทีกันบอทโดนบล็อก
+        
+    print("✅ ส่งข้อมูล 50 อันดับเข้า Discord เรียบร้อย!")
+
+if __name__ == "__main__":
+    main()
