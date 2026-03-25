@@ -10,77 +10,88 @@ DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG
 
 def get_sp500_tickers():
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    response = requests.get(url, headers=headers)
-    df = pd.read_html(response.text)[0]
-    # แปลง . เป็น - สำหรับหุ้นที่มีคลาส (เช่น BRK.B -> BRK-B)
-    return df['Symbol'].str.replace('.', '-', regex=False).tolist()
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    try:
+        response = requests.get(url, headers=headers)
+        df = pd.read_html(response.text)[0]
+        return df['Symbol'].str.replace('.', '-', regex=False).tolist()
+    except Exception as e:
+        print(f"Error fetching tickers: {e}")
+        return []
 
-def send_to_discord_chunks(df, title):
-    """แบ่งส่งข้อมูลเข้า Discord กลุ่มละ 10-15 ตัว เพื่อไม่ให้ข้อความยาวเกินกำหนด"""
-    if not DISCORD_WEBHOOK_URL:
-        print("Error: Discord Webhook URL not found.")
-        return
-
-    # ส่งหัวข้อ
-    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🔥 **{title}** 🔥"})
-    
-    # แบ่งส่งทีละ 10 ตัวเพื่อให้แสดงผลสวยงามบนมือถือ
-    chunks = [df[i:i + 10] for i in range(0, len(df), 10)]
-    
-    for chunk in chunks:
-        message = "```\n"
-        message += f"{'Ticker':<7} | {'Change%':<8} | {'Price':<8} | {'Prev 3 Days'}\n"
-        message += "-" * 50 + "\n"
-        
-        for _, row in chunk.iterrows():
-            # ดึงประวัติ 3 วันล่าสุดมาโชว์คู่กัน
-            history = f"{row['Day-1 (Prev)']}, {row['Day-2']}, {row['Day-3']}"
-            line = f"{row['Ticker']:<7} | {row['Change %']:>7}% | {row['Current Price']:>8} | {history}\n"
-            message += line
-        
-        message += "```"
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
-        time.sleep(1) # ป้องกัน Discord Rate Limit (429)
+def format_stat(current, previous):
+    """คำนวณ % และคืนค่าพร้อม Emoji วงกลม สีเขียว/แดง"""
+    if previous == 0: return "⚪0.0%"
+    diff = ((current - previous) / previous) * 100
+    emoji = "🟢" if diff >= 0 else "🔴"
+    return f"{emoji}{abs(diff):.1f}%"
 
 def main():
-    print("🚀 Starting Stock Analysis...")
+    print("🚀 เริ่มวิเคราะห์หุ้น US Top Gainers และประวัติ 5 วัน...")
     tickers = get_sp500_tickers()
-    
-    # ดึงข้อมูลรวดเดียว (Batch Download)
-    # period="10d" เพื่อให้มั่นใจว่าได้วันทำการครบ แม้ติดเสาร์-อาทิตย์
-    data = yf.download(tickers, period="10d", interval="1d", group_by='ticker', threads=True)
+    if not tickers: return
+
+    # ดึงข้อมูลย้อนหลัง 12 วันเพื่อให้ได้วันทำการครบถ้วน
+    data = yf.download(tickers, period="12d", interval="1d", group_by='ticker', threads=True)
     
     all_results = []
     for ticker in tickers:
         try:
-            # ดึงราคาปิด 6 แถว (วันนี้ + ย้อนหลัง 5 วันทำการ)
-            history = data[ticker]['Close'].dropna().tail(6)
-            if len(history) < 6: continue
+            # ดึงราคาปิดและลบค่าที่เป็น NaN
+            history = data[ticker]['Close'].dropna()
+            if len(history) < 6: continue 
             
-            curr = history.iloc[-1]
-            prev = history.iloc[-2]
-            pct_change = ((curr - prev) / prev) * 100
+            # ดึง 6 วันล่าสุดเพื่อคำนวณการเปลี่ยนแปลงของ 5 วันล่าสุด
+            # [Day-5, Day-4, Day-3, Day-2, Day-1, Today]
+            h = history.tail(6)
             
-            # เก็บข้อมูลลง List
+            current_price = h.iloc[-1]
+            # คำนวณ % Change ของวันนี้เทียบกับเมื่อวานเพื่อจัดอันดับ
+            today_pct = ((current_price - h.iloc[-2]) / h.iloc[-2]) * 100
+            
+            # เก็บข้อมูล List ของ % Change ย้อนหลัง 5 วัน (รวมวันนี้)
+            stats = []
+            for i in range(1, 6):
+                # i=1 คือ Today vs Day-1, i=2 คือ Day-1 vs Day-2 ...
+                stats.append(format_stat(h.iloc[-i], h.iloc[-(i+1)]))
+
             all_results.append({
                 'Ticker': ticker,
-                'Current Price': round(curr, 2),
-                'Change %': round(pct_change, 2),
-                'Day-1 (Prev)': round(history.iloc[-2], 2),
-                'Day-2': round(history.iloc[-3], 2),
-                'Day-3': round(history.iloc[-4], 2)
+                'Price': current_price,
+                'Change': today_pct,
+                'DisplayStats': stats # [Today, Day-1, Day-2, Day-3, Day-4]
             })
-        except:
-            continue
+        except: continue
 
-    # แปลงเป็น DataFrame และดึง Top 50 Gainers
+    # เลือก Top 50 ที่ขึ้นแรงที่สุดวันนี้
     df = pd.DataFrame(all_results)
-    top_50 = df.sort_values(by='Change %', ascending=False).head(50)
+    top_50 = df.sort_values(by='Change', ascending=False).head(50)
+
+    # เตรียมส่ง Discord
+    header_text = "🚀 **TOP 50 US GAINERS (5-DAY TREND)** 🚀\n"
+    table_header = f"{'Ticker':<7} | {'Price':<7} | {'Today':<7} | {'History (D-1 to D-4)':<25}\n"
+    sep = "-" * 62 + "\n"
     
-    # ส่งข้อมูลเข้า Discord
-    send_to_discord_chunks(top_50, "TOP 50 US GAINERS TODAY (S&P 500)")
-    print("✅ Analysis sent to Discord successfully.")
+    current_batch = ""
+    for _, row in top_50.iterrows():
+        # รูปแบบ: Today | Day-1 Day-2 Day-3 Day-4
+        history_line = " ".join(row['DisplayStats'][1:]) 
+        line = f"{row['Ticker']:<7} | {row['Price']:>7.2f} | {row['DisplayStats'][0]:<7} | {history_line}\n"
+        
+        # ตรวจสอบความยาวไม่ให้เกิน 2000 ตัวอักษรต่อหนึ่งข้อความ Discord
+        if len(header_text + "```\n" + current_batch + line + "```") > 1900:
+            full_msg = header_text + "```\n" + table_header + sep + current_batch + "```"
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": full_msg})
+            current_batch = line
+            header_text = "" # หัวข้อส่งแค่ครั้งแรก
+        else:
+            current_batch += line
+
+    if current_batch:
+        full_msg = header_text + "```\n" + (table_header if header_text else "") + sep + current_batch + "```"
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": full_msg})
+
+    print("✅ วิเคราะห์เสร็จสิ้นและส่งข้อมูลเข้า Discord เรียบร้อยแล้ว")
 
 if __name__ == "__main__":
     main()
