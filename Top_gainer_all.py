@@ -10,9 +10,8 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # ดึงค่า Webhook
 DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5'
-
 # --- ตั้งค่าตัวกรองหุ้น (Filters) ---
-TOP_N = 100                      # จำนวนหุ้น Top Gainer ที่ต้องการจัดอันดับ (เช่น 50 หรือ 100)
+TOP_N = 100                     # จำนวนหุ้น Top Gainer ที่ต้องการจัดอันดับ (เช่น 50 หรือ 100)
 MIN_PRICE = 3.0                 # ราคาขั้นต่ำ 3 ดอลลาร์
 MIN_DOLLAR_VOLUME = 15_000_000  # มูลค่าซื้อขายเฉลี่ยขั้นต่ำ 15 ล้านดอลลาร์/วัน
 
@@ -98,7 +97,6 @@ def main():
         volume_data = data['Volume']
         
         # 🛡️ ล็อกวันที่จากแกนเวลา (Index) โดยตรง 
-        # วิธีนี้แก้ปัญหา yfinance แอบลบแถวที่ข้อมูลไม่ครบจนทำให้การคำนวณ % เพี้ยนไปเป็นของเมื่อวาน
         try:
             d0 = close_data.index[-1] # วันล่าสุด
             d1 = close_data.index[-2] # 1 วันก่อน
@@ -165,12 +163,47 @@ def main():
         print(top_gainers.head())
         return
 
+    # --- ดึงข้อมูล Sector สำหรับ Top N ---
+    print(f"กำลังดึงข้อมูลอุตสาหกรรม (Sector) สำหรับหุ้น Top {TOP_N} ตัว (อาจใช้เวลาสักครู่)...")
+    sectors = []
+    for ticker in top_gainers['Ticker']:
+        try:
+            info = yf.Ticker(ticker).info
+            sector = info.get('sector', 'Unknown')
+            sectors.append(sector)
+        except Exception:
+            sectors.append('Unknown')
+        time.sleep(0.1) # ป้องกันการโดนแบนจากการดึง info ถี่ๆ
+        
+    top_gainers['Sector'] = sectors
+    
+    # --- คำนวณ Sector Summary ---
+    sector_msg_content = f"📊 **SECTOR TREND SUMMARY (จาก Top {TOP_N})** 📊\n"
+    sector_msg_content += "-" * 55 + "\n"
+    
+    valid_sectors = top_gainers[top_gainers['Sector'] != 'Unknown']
+    if not valid_sectors.empty:
+        sector_summary = valid_sectors.groupby('Sector').agg(
+            Count=('Ticker', 'count'),
+            AvgChange=('SortVal', 'mean')
+        ).reset_index().sort_values(by=['Count', 'AvgChange'], ascending=[False, False])
+        
+        for _, row in sector_summary.iterrows():
+            avg_val = row['AvgChange']
+            emoji = "🟢" if avg_val >= 0 else "🔴"
+            sector_msg_content += f"🔹 **{row['Sector']}**: ติดอันดับ **{row['Count']}** ตัว | เฉลี่ยกลุ่ม {emoji}{abs(avg_val):.1f}%\n"
+    else:
+        sector_msg_content += "ไม่พบข้อมูล Sector ที่ชัดเจน\n"
+
     # --- ส่งเข้า Discord ---
     print(f"ส่งข้อมูล Top {TOP_N} Gainers (Automatic)...")
     title_top = f"TOP {TOP_N} GAINERS (Price > ${MIN_PRICE}, Avg Vol > ${MIN_DOLLAR_VOLUME/1_000_000}M)"
     send_to_discord(top_gainers, title_top, DISCORD_WEBHOOK_URL)
+    
+    print("ส่งข้อมูล Sector Summary...")
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": sector_msg_content})
         
-    print("✅ สแกนทั้งตลาดและส่งเข้า Discord เรียบร้อย!")
+    print("✅ สแกนทั้งตลาด ดึงกลุ่ม Sector และส่งเข้า Discord เรียบร้อย!")
 
 if __name__ == "__main__":
     main()
