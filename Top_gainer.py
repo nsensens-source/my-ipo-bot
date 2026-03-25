@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 import json
+import requests
 
 # --- ตั้งค่า Webhook ของคุณที่นี่ ---
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5"
@@ -39,9 +40,22 @@ def send_to_discord(df):
 def get_top_50_gainers_with_history():
     print("กำลังดึงข้อมูลและวิเคราะห์หุ้น US...")
     
-    # ดึงรายชื่อ S&P 500
-    payload = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
-    df_sp500 = payload[0]
+    # --- ส่วนที่แก้ไข: เพิ่ม User-Agent เพื่อแก้ Error 403 ---
+    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        # ใช้ pd.read_html อ่านจาก text ของ response แทนการใส่ URL ตรงๆ
+        payload = pd.read_html(response.text)
+        df_sp500 = payload[0]
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการดึงรายชื่อหุ้น: {e}")
+        return pd.DataFrame() # ส่ง DataFrame ว่างกลับไปถ้าดึงไม่ได้
+    # --------------------------------------------------
+
     tickers = df_sp500['Symbol'].str.replace('.', '-', regex=False).tolist()
 
     # ดึงข้อมูลราคาย้อนหลัง
