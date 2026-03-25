@@ -1,4 +1,4 @@
-name: Top Mover
+name: Top Gainer
 
 on:
   workflow_dispatch: # กดรันมือได้ตลอดเวลา
