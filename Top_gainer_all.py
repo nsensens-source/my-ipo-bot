@@ -164,16 +164,31 @@ def main():
         return
 
     # --- ดึงข้อมูล Sector สำหรับ Top N ---
-    print(f"กำลังดึงข้อมูลอุตสาหกรรม (Sector) สำหรับหุ้น Top {TOP_N} ตัว (อาจใช้เวลาสักครู่)...")
+    print(f"กำลังดึงข้อมูลอุตสาหกรรม (Sector) สำหรับหุ้น Top {TOP_N} ตัว (อาจใช้เวลาประมาณ 1 นาที)...")
     sectors = []
+    
+    # สร้าง Session เลียนแบบเบราว์เซอร์ปกติ ป้องกัน Yahoo บล็อก IP ของ GitHub Actions
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    
     for ticker in top_gainers['Ticker']:
         try:
-            info = yf.Ticker(ticker).info
+            # ใช้ Ticker พร้อม session
+            info = yf.Ticker(ticker, session=session).info
             sector = info.get('sector', 'Unknown')
+            
+            # Fallback หากไม่มี Sector ลองดึง Industry แทน
+            if not sector or sector == 'Unknown':
+                sector = info.get('industry', 'Unknown')
+                
             sectors.append(sector)
         except Exception:
             sectors.append('Unknown')
-        time.sleep(0.1) # ป้องกันการโดนแบนจากการดึง info ถี่ๆ
+            
+        # เพิ่มเวลาพักเป็น 0.5 วินาที เพื่อถนอมเซิร์ฟเวอร์ Yahoo ไม่ให้โดนบล็อก
+        time.sleep(0.5) 
         
     top_gainers['Sector'] = sectors
     
