@@ -10,7 +10,9 @@ logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # ดึงค่า Webhook
 DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5'
+
 # --- ตั้งค่าตัวกรองหุ้น (Filters) ---
+TOP_N = 100                      # จำนวนหุ้น Top Gainer ที่ต้องการจัดอันดับ (เช่น 50 หรือ 100)
 MIN_PRICE = 3.0                 # ราคาขั้นต่ำ 3 ดอลลาร์
 MIN_DOLLAR_VOLUME = 15_000_000  # มูลค่าซื้อขายเฉลี่ยขั้นต่ำ 15 ล้านดอลลาร์/วัน
 
@@ -155,18 +157,18 @@ def main():
         
     all_df = pd.DataFrame(results)
 
-    # จัดอันดับ Top 50 จากทั้งตลาด 100%
-    top_50 = all_df.sort_values(by='SortVal', ascending=False).head(50)
+    # จัดอันดับ Top N จากทั้งตลาด 100%
+    top_gainers = all_df.sort_values(by='SortVal', ascending=False).head(TOP_N)
     
     if not DISCORD_WEBHOOK_URL:
         print("Error: ไม่พบ Webhook URL กรุณาตั้งค่า DISCORD_WEBHOOK_TOPGAINER")
-        print(top_50.head())
+        print(top_gainers.head())
         return
 
     # --- ส่งเข้า Discord ---
-    print("ส่งข้อมูล Top 50 Gainers (Automatic)...")
-    title_top50 = f"TOP 50 GAINERS (Price > ${MIN_PRICE}, Avg Vol > ${MIN_DOLLAR_VOLUME/1_000_000}M)"
-    send_to_discord(top_50, title_top50, DISCORD_WEBHOOK_URL)
+    print(f"ส่งข้อมูล Top {TOP_N} Gainers (Automatic)...")
+    title_top = f"TOP {TOP_N} GAINERS (Price > ${MIN_PRICE}, Avg Vol > ${MIN_DOLLAR_VOLUME/1_000_000}M)"
+    send_to_discord(top_gainers, title_top, DISCORD_WEBHOOK_URL)
         
     print("✅ สแกนทั้งตลาดและส่งเข้า Discord เรียบร้อย!")
 
