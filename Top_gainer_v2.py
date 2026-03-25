@@ -6,7 +6,7 @@ import os
 
 # แนะนำให้ใช้ GitHub Secrets ในการเก็บ URL เพื่อความปลอดภัย
 # โดยตั้งชื่อ Secret ว่า DISCORD_WEBHOOK
-DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_TOPGAINER')
+DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1476755678931456062/LpfG3Eq5jgnOmW8-q2BhfGPAEK3Jd-YEbiaH2oJiEHis0B51mvkYILkKuIKbu3Y3yKc5'
 
 def get_sp500_tickers():
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
