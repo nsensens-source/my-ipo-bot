@@ -4,6 +4,7 @@ import requests
 import os
 import time
 import logging
+import io
 
 # ปิดการแจ้งเตือนขยะจาก yfinance
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -36,11 +37,13 @@ def get_all_us_tickers():
     # 2. ดึงจาก S&P 500 (กันเหนียวเผื่อ SEC ตกหล่น)
     try:
         wiki_url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-        df = pd.read_html(requests.get(wiki_url, headers={'User-Agent': 'Mozilla/5.0'}).text)[0]
+        html_content = requests.get(wiki_url, headers={'User-Agent': 'Mozilla/5.0'}).text
+        # ใช้ io.StringIO ครอบข้อความ html เพื่อแก้ FutureWarning ของ pandas
+        df = pd.read_html(io.StringIO(html_content))[0]
         sp500 = df['Symbol'].str.replace('.', '-', regex=False).tolist()
         valid_tickers.update(sp500)
-    except:
-        pass
+    except Exception as e:
+        print(f"S&P 500 Fetch Error: {e}")
         
     return list(valid_tickers)
 
@@ -71,8 +74,8 @@ def main():
         # ป้องกันบั๊กของ yfinance เมื่อดาวน์โหลดหุ้นแค่ตัวเดียว
         if len(chunk) == 1: chunk.append('AAPL')
 
-        # ดาวน์โหลดข้อมูลทีละกลุ่ม
-        data = yf.download(chunk, period="12d", interval="1d", threads=True, progress=False, show_errors=False)
+        # ดาวน์โหลดข้อมูลทีละกลุ่ม (เอา show_errors=False ออกเพื่อแก้ TypeError)
+        data = yf.download(chunk, period="12d", interval="1d", threads=True, progress=False)
         
         if 'Close' not in data: continue
             
