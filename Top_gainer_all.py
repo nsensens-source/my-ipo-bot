@@ -222,6 +222,7 @@ def main():
             sector = sp1500_sectors[ticker]
         else:
             # วิธีที่ 2: ยิง API ไปที่ Yahoo Finance โดยตรง (หลบการบล็อกของไลบรารี yfinance)
+            # แก้ไขบั๊ก URL มาร์กดาวน์
             try:
                 url = f"[https://query2.finance.yahoo.com/v10/finance/quoteSummary/](https://query2.finance.yahoo.com/v10/finance/quoteSummary/){ticker}?modules=assetProfile"
                 res = session.get(url, timeout=5)
@@ -261,8 +262,11 @@ def main():
             avg_val = row['AvgChange']
             emoji = "🟢" if avg_val >= 0 else "🔴"
             sector_msg_content += f"🔹 **{row['Sector']}**: ติดอันดับ **{row['Count']}** ตัว | เฉลี่ยกลุ่ม {emoji}{abs(avg_val):.1f}%\n"
-    else:
-        sector_msg_content += "ไม่พบข้อมูล Sector ที่ชัดเจน\n"
+            
+    # เพิ่มการแสดงหุ้นที่หา Sector ไม่เจอ เพื่อให้เห็นภาพรวมเต็ม 100 ตัว
+    unknown_count = top_gainers[top_gainers['Sector'] == 'Unknown'].shape[0]
+    if unknown_count > 0:
+        sector_msg_content += f"\n🔸 **ไม่สามารถระบุกลุ่มได้ (Unknown / อื่นๆ)**: {unknown_count} ตัว\n"
 
     # --- ส่งเข้า Discord ---
     print(f"ส่งข้อมูล Top {TOP_N} Gainers (Automatic)...")
