@@ -4,6 +4,7 @@ import requests
 import os
 import time
 import logging
+import io
 
 # ปิดการแจ้งเตือนขยะจาก yfinance
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
@@ -32,6 +33,41 @@ def get_all_us_tickers():
         print(f"SEC Fetch Error: {e}")
         
     return list(valid_tickers)
+
+def get_market_sectors():
+    """ดึงข้อมูล Sector พื้นฐานจาก S&P 500, 400, 600 (ครอบคลุมหุ้นหลัก 1500 ตัว)"""
+    sector_map = {}
+    urls = [
+        'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies',
+        'https://en.wikipedia.org/wiki/List_of_S%26P_400_companies',
+        'https://en.wikipedia.org/wiki/List_of_S%26P_600_companies'
+    ]
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    for url in urls:
+        try:
+            html = requests.get(url, headers=headers, timeout=10).text
+            df = pd.read_html(io.StringIO(html))[0]
+            
+            # หาคอลัมน์ชื่อหุ้น
+            ticker_col = None
+            for col in ['Symbol', 'Ticker Symbol', 'Ticker']:
+                if col in df.columns:
+                    ticker_col = col
+                    break
+                    
+            # หาคอลัมน์กลุ่มอุตสาหกรรม
+            sector_col = None
+            for col in ['GICS Sector', 'Sector']:
+                if col in df.columns:
+                    sector_col = col
+                    break
+                    
+            if ticker_col and sector_col:
+                mapping = dict(zip(df[ticker_col].astype(str).str.replace('.', '-', regex=False), df[sector_col]))
+                sector_map.update(mapping)
+        except Exception as e:
+            print(f"Error fetching sectors from {url}: {e}")
+    return sector_map
 
 def format_pct(current, previous):
     """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง"""
@@ -165,31 +201,48 @@ def main():
         return
 
     # --- ดึงข้อมูล Sector สำหรับ Top N ---
-    print(f"กำลังดึงข้อมูลอุตสาหกรรม (Sector) สำหรับหุ้น Top {TOP_N} ตัว (อาจใช้เวลาประมาณ 1 นาที)...")
+    print(f"กำลังดึงข้อมูลอุตสาหกรรม (Sector) สำหรับหุ้น Top {TOP_N} ตัว (ระบบ 3 ชั้น กันบล็อก)...")
+    
+    # 1. โหลดข้อมูล Sector สำรองจาก S&P 1500 (เร็วและไม่โดนบล็อก 100%)
+    sp1500_sectors = get_market_sectors()
+    
     sectors = []
     
-    # สร้าง Session เลียนแบบเบราว์เซอร์ปกติ ป้องกัน Yahoo บล็อก IP ของ GitHub Actions
+    # สร้าง Session เลียนแบบเบราว์เซอร์ปกติ
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     })
     
     for ticker in top_gainers['Ticker']:
-        try:
-            # ใช้ Ticker พร้อม session
-            info = yf.Ticker(ticker, session=session).info
-            sector = info.get('sector', 'Unknown')
-            
-            # Fallback หากไม่มี Sector ลองดึง Industry แทน
-            if not sector or sector == 'Unknown':
-                sector = info.get('industry', 'Unknown')
+        sector = 'Unknown'
+        
+        # วิธีที่ 1: ดึงจากฐานข้อมูล S&P 1500 ที่โหลดมา
+        if ticker in sp1500_sectors:
+            sector = sp1500_sectors[ticker]
+        else:
+            # วิธีที่ 2: ยิง API ไปที่ Yahoo Finance โดยตรง (หลบการบล็อกของไลบรารี yfinance)
+            try:
+                url = f"[https://query2.finance.yahoo.com/v10/finance/quoteSummary/](https://query2.finance.yahoo.com/v10/finance/quoteSummary/){ticker}?modules=assetProfile"
+                res = session.get(url, timeout=5)
+                if res.status_code == 200:
+                    data = res.json()
+                    profile = data.get('quoteSummary', {}).get('result', [{}])[0].get('assetProfile', {})
+                    sector = profile.get('sector', profile.get('industry', 'Unknown'))
+            except Exception:
+                pass
                 
-            sectors.append(sector)
-        except Exception:
-            sectors.append('Unknown')
+            # วิธีที่ 3: ใช้ yfinance เป็นด่านสุดท้าย
+            if sector == 'Unknown':
+                try:
+                    info = yf.Ticker(ticker, session=session).info
+                    sector = info.get('sector', info.get('industry', 'Unknown'))
+                except Exception:
+                    pass
             
-        # เพิ่มเวลาพักเป็น 0.5 วินาที เพื่อถนอมเซิร์ฟเวอร์ Yahoo ไม่ให้โดนบล็อก
-        time.sleep(0.5) 
+            time.sleep(0.5) # พักเซิร์ฟเวอร์เฉพาะเวลาที่ยิง API สด
+            
+        sectors.append(sector)
         
     top_gainers['Sector'] = sectors
     
