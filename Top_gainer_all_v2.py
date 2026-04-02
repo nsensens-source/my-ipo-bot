@@ -63,13 +63,17 @@ def get_market_sectors():
             print(f"Error fetching sectors from {url}: {e}")
     return sector_map
 
-def format_pct(current, previous, show_percent=True):
-    """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง (เลือกปิดเครื่องหมาย % ได้เพื่อลดพื้นที่)"""
+def format_pct(current, previous, show_percent=True, decimals=1):
+    """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง (สามารถซ่อนทศนิยมและ % ได้เพื่อประหยัดพื้นที่)"""
     if pd.isna(current) or pd.isna(previous) or previous == 0: 
-        return "⚪0.0%" if show_percent else "⚪0.0"
+        val_str = f"0.{'0'*decimals}" if decimals > 0 else "0"
+        return f"⚪{val_str}%" if show_percent else f"⚪{val_str}"
+    
     diff = ((current - previous) / previous) * 100
     emoji = "🟢" if diff >= 0 else "🔴"
-    return f"{emoji}{abs(diff):.1f}%" if show_percent else f"{emoji}{abs(diff):.1f}"
+    val_str = f"{abs(diff):.{decimals}f}"
+    
+    return f"{emoji}{val_str}%" if show_percent else f"{emoji}{val_str}"
 
 def send_to_discord(df, title, webhook_url, history_header="D-1 to D-10"):
     """ฟังก์ชันจัดการส่งข้อความเข้า Discord แบบตัดก้อนอัตโนมัติ"""
@@ -77,16 +81,16 @@ def send_to_discord(df, title, webhook_url, history_header="D-1 to D-10"):
     
     header = f"🎯 **{title}** 🎯\n"
     cb = "```" 
-    # บีบตารางให้แคบลง ตัดเว้นวรรคที่ไม่จำเป็นออก
-    table_header = f"{cb}text\n{'Sym':<5}|{'Price':>7}|{'Today':<8}|{'10D Sum':<16}|{history_header}\n"
-    table_header += "-" * 105 + "\n"
+    # บีบตารางให้แคบลงสุดๆ ตัดเว้นวรรคที่ไม่จำเป็นออก
+    table_header = f"{cb}text\n{'Sym':<5}|{'Price':>7}|{'Today':<7}|{'10D Sum':<12}|{history_header}\n"
+    table_header += "-" * 75 + "\n"
     
     current_msg = header + table_header
     messages_to_send = []
 
     for _, row in df.iterrows():
-        # จัดรูปแบบบรรทัดให้แนบชิดกันมากขึ้น
-        line = f"{row['Ticker']:<5}|{row['Price']:>7.2f}|{row['Today']:<8}|{row['Sum10D']:<16}|{row['History']}\n"
+        # จัดรูปแบบบรรทัดให้แนบชิดกัน
+        line = f"{row['Ticker']:<5}|{row['Price']:>7.2f}|{row['Today']:<7}|{row['Sum10D']:<12}|{row['History']}\n"
         
         if len(current_msg) + len(line) > 1900:
             current_msg += f"{cb}" 
@@ -168,8 +172,9 @@ def main():
                 
                 price_10d_ago = close_data.loc[global_dates[-11], ticker]
                 
-                # บีบช่องว่างออก (ไม่เคาะวรรคระหว่าง 🟢 กับ 🔴)
-                sum10d_str = f"🟢{up_days}🔴{down_days}({format_pct(curr_price, price_10d_ago)})"
+                # บีบช่องว่างออก และตัดทศนิยมออกเพื่อให้แคบที่สุด เช่น 🟢5🔴4(🟢337)
+                sum10_pct = format_pct(curr_price, price_10d_ago, show_percent=False, decimals=0)
+                sum10d_str = f"🟢{up_days}🔴{down_days}({sum10_pct})"
                 
                 # --- ดึง % ย้อนหลัง 10 วันรายวัน ---
                 history_pcts = []
@@ -180,18 +185,20 @@ def main():
                     if pd.isna(curr_hist) or pd.isna(prev_hist):
                         valid_history = False
                         break
-                    # ตั้งค่า show_percent=False เพื่อลดเครื่องหมาย % ประหยัดพื้นที่
-                    history_pcts.append(format_pct(curr_hist, prev_hist, show_percent=False))
+                    # ตัดทั้ง % และ ตัดจุดทศนิยมทิ้งไปเลย (decimals=0) เพื่อประหยัดที่สุด
+                    history_pcts.append(format_pct(curr_hist, prev_hist, show_percent=False, decimals=0))
                 
                 if not valid_history: continue
                 
                 results.append({
                     'Ticker': ticker,
                     'Price': curr_price,
-                    'Today': format_pct(curr_price, prev_price),
+                    # Today ให้ซ่อน % แต่เหลือทศนิยม 1 ตำแหน่ง
+                    'Today': format_pct(curr_price, prev_price, show_percent=False, decimals=1),
                     'SortVal': today_pct_val,
                     'Sum10D': sum10d_str,
-                    'History': " ".join(history_pcts),
+                    # นำประวัติมาต่อกันโดยไม่ใส่เว้นวรรค
+                    'History': "".join(history_pcts),
                     'IsWatchlist': is_watchlist
                 })
             except Exception:
