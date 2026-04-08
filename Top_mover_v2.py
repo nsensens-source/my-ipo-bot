@@ -63,31 +63,32 @@ def get_market_sectors():
             print(f"Error fetching sectors from {url}: {e}")
     return sector_map
 
-def format_pct(current, previous):
-    """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง"""
-    if pd.isna(current) or pd.isna(previous) or previous == 0: return "⚪0.0%"
+def format_pct(current, previous, hide_pct=False):
+    """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง (เพิ่มออปชั่นซ่อนเครื่องหมาย % เพื่อประหยัดพื้นที่)"""
+    if pd.isna(current) or pd.isna(previous) or previous == 0: 
+        return "⚪0.0" if hide_pct else "⚪0.0%"
     diff = ((current - previous) / previous) * 100
     emoji = "🟢" if diff >= 0 else "🔴"
-    return f"{emoji}{abs(diff):.1f}%"
+    sym = "" if hide_pct else "%"
+    return f"{emoji}{abs(diff):.1f}{sym}"
 
 def send_to_discord(df, title, webhook_url, history_header="D-1 to D-10 Trend"):
-    """ฟังก์ชันจัดการส่งข้อความเข้า Discord แบบตัดก้อนอัตโนมัติ (ปรับช่องว่างให้กระชับ)"""
+    """ฟังก์ชันจัดการส่งข้อความเข้า Discord แบบตัดก้อนอัตโนมัติ"""
     if df.empty: return
     
     header = f"🎯 **{title}** 🎯\n"
     cb = "```" 
     
-    # ปรับความกว้างคอลัมน์ และตัดเว้นวรรคซ้ายขวาของเส้นคั่น | ออก
-    table_header = f"{cb}text\n{'Sym':<5}|{'Price':>7}|{'Today':<8}|{'10D Sum':<16}| {history_header}\n"
-    table_header += "-" * 105 + "\n"
+    # ปรับช่องว่างให้ชิดที่สุด
+    table_header = f"{cb}text\n{'Sym':<5}|{'Price':>7}|{'Today':<8}|{'10D Sum':<15}|{history_header}\n"
+    table_header += "-" * 95 + "\n"
     
     current_msg = header + table_header
     messages_to_send = []
 
     for _, row in df.iterrows():
-        # จำกัดความยาว Ticker ไม่ให้เกิน 5 ตัวอักษรเพื่อไม่ให้ตารางพัง
         ticker = str(row['Ticker'])[:5]
-        line = f"{ticker:<5}|{row['Price']:>7.2f}|{row['Today']:<8}|{row['Sum10D']:<16}| {row['History']}\n"
+        line = f"{ticker:<5}|{row['Price']:>7.2f}|{row['Today']:<8}|{row['Sum10D']:<15}|{row['History']}\n"
         
         if len(current_msg) + len(line) > 1900:
             current_msg += f"{cb}" 
@@ -146,13 +147,11 @@ def main():
                 avg_vol_5d = volume_data[ticker].tail(5).mean()
                 if pd.isna(avg_vol_5d): continue
                 
-                # --- 🛡️ FILTER LOGIC ---
                 is_watchlist = ticker in CUSTOM_WATCHLIST
                 if not is_watchlist:
                     if curr_price < MIN_PRICE: continue
                     dollar_vol = curr_price * avg_vol_5d
                     if dollar_vol < MIN_DOLLAR_VOLUME: continue
-                # ------------------------
                 
                 today_pct_val = ((curr_price - prev_price) / prev_price) * 100
 
@@ -166,7 +165,7 @@ def main():
                 
                 price_10d_ago = close_data.loc[global_dates[-11], ticker]
                 
-                # ปรับช่องว่างให้กระชับขึ้น 
+                # ช่องสรุป 10 วันยังเก็บ % ไว้เหมือนเดิม
                 sum10d_str = f"🟢{up_days}🔴{down_days}({format_pct(curr_price, price_10d_ago)})"
                 
                 history_pcts = []
@@ -177,7 +176,8 @@ def main():
                     if pd.isna(curr_hist) or pd.isna(prev_hist):
                         valid_history = False
                         break
-                    history_pcts.append(format_pct(curr_hist, prev_hist))
+                    # สั่ง hide_pct=True เพื่อซ่อนเครื่องหมาย % ประหยัดที่
+                    history_pcts.append(format_pct(curr_hist, prev_hist, hide_pct=True))
                 
                 if not valid_history: continue
                 
@@ -188,7 +188,7 @@ def main():
                     'SortVal': today_pct_val,
                     'AbsSortVal': abs(today_pct_val),
                     'Sum10D': sum10d_str,
-                    'History': "".join(history_pcts), # ลบช่องว่างระหว่าง % ออกให้ประหยัดพื้นที่
+                    'History': "".join(history_pcts), # ต่อกันไปเลยโดยไม่มีช่องว่าง
                     'IsWatchlist': is_watchlist
                 })
             except Exception:
@@ -245,7 +245,7 @@ def main():
     top_movers = top_movers.copy()
     top_movers['Sector'] = sectors
     
-    sector_msg_content = f"📊 **SECTOR TREND SUMMARY (จาก Top {TOP_N} MOVERS)** 📊\n"
+    sector_msg_content = f"📊 **SECTOR TREND SUMMARY (จาก Top {TOP_N} MO উভয়ের)** 📊\n"
     sector_msg_content += "-" * 55 + "\n"
     
     valid_sectors = top_movers[top_movers['Sector'] != 'Unknown']
