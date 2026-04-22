@@ -18,7 +18,7 @@ DISCORD_WEBHOOK_URL = os.getenv(
 # 📌 เพิ่มหุ้นที่ต้องการดูเฉพาะเจาะจงลงในนี้ได้เลย (ใส่ได้ไม่จำกัด)
 CUSTOM_WATCHLIST = ['LITE', 'AAOI', 'AAPL', 'TSLA', 'PLTR', 'SNDK', 'MU', 'AXTI', 'BE', 'CRDO', 'ALAB','CIEN','PLTR','APLD','COHR','IREN','COMP','BWET','LQDA','HIMS',
                     'AMD', 'NVDA','LRCX','WDC','STX','KLAC','GLW','TSEM','QBTS','QUBT','RGTI','IONQ','CAR','SIVEF','POET','ONDS','NVTS','HUT','LUNR','SKYQ',
-                    'AOSL','ALGT','CIFR','ALAB']
+                    'AOSL','ALGT','CIFR','ALAB','TSM']
 
 def format_pct(current, previous, hide_pct=False):
     """คำนวณ % และใส่ 🟢 หุ้นขึ้น หรือ 🔴 หุ้นลง"""
