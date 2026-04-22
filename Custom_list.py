@@ -108,7 +108,7 @@ def main():
             
             if pd.isna(curr_price) or pd.isna(prev_price): continue
             
-            # ไม่ต้องกรองราคาและโวลุ่ม เพราะเป็นหุ้นที่เราเลือกมาเอง
+            # เก็บค่า % จริงๆ สำหรับเอาไว้ใช้ Sort
             today_pct_val = ((curr_price - prev_price) / prev_price) * 100
 
             up_days = 0
@@ -130,7 +130,6 @@ def main():
                 if pd.isna(curr_hist) or pd.isna(prev_hist):
                     valid_history = False
                     break
-                # ซ่อนเครื่องหมาย % ประหยัดที่
                 history_pcts.append(format_pct(curr_hist, prev_hist, hide_pct=True))
             
             if not valid_history: continue
@@ -139,7 +138,7 @@ def main():
                 'Ticker': ticker,
                 'Price': curr_price,
                 'Today': format_pct(curr_price, prev_price),
-                'AbsSortVal': abs(today_pct_val),
+                'SortVal': today_pct_val, # ใช้ค่าเปอร์เซ็นต์จริง (บวกลบตามจริง)
                 'Sum10D': sum10d_str,
                 'History': "".join(history_pcts)
             })
@@ -151,8 +150,9 @@ def main():
         print("ไม่สามารถคำนวณข้อมูลหุ้นใดๆ ได้")
         return
         
-    # จัดเรียงตามเปอร์เซ็นต์การขยับ (Mover) จากมากไปน้อย
-    watchlist_df = pd.DataFrame(results).sort_values(by='AbsSortVal', ascending=False)
+    # 📌 แก้ไขตรงนี้: เปลี่ยนจากการจัดเรียงด้วย AbsSortVal เป็น SortVal 
+    # จะทำให้มันเรียงจาก บวกมากที่สุด ไปหา ลบมากที่สุด ตามลำดับ
+    watchlist_df = pd.DataFrame(results).sort_values(by='SortVal', ascending=False)
     
     if not DISCORD_WEBHOOK_URL:
         print("Error: ไม่พบ Webhook URL")
