@@ -16,7 +16,7 @@ DISCORD_WEBHOOK_URL = os.getenv(
 )
 
 # 📌 เพิ่มหุ้นที่ต้องการดูเฉพาะเจาะจงลงในนี้ได้เลย (ใส่ได้ไม่จำกัด)
-CUSTOM_WATCHLIST = ['LITE', 'AAOI', 'AAPL', 'TSLA', 'PLTR', 'SNDK', 'MU', 'AXTI', 'BE', 'CRDO', 'ALAB','CIEN','PLTR','APLD','COHR','IREN','COMP','BWET','LQDA','HIMS','QS','AGPU','AMSC','GEV','MX",'OCC','PSIX',
+CUSTOM_WATCHLIST = ['LITE', 'AAOI', 'AAPL', 'TSLA', 'PLTR', 'SNDK', 'MU', 'AXTI', 'BE', 'CRDO', 'ALAB','CIEN','PLTR','APLD','COHR','IREN','COMP','BWET','LQDA','HIMS','QS','AGPU','AMSC','GEV','MX','OCC','PSIX',
                     'AMD', 'NVDA','LRCX','WDC','STX','KLAC','GLW','TSEM','QBTS','QUBT','RGTI','IONQ','CAR','SIVEF','POET','ONDS','NVTS','HUT','LUNR','SKYQ',
                     'AOSL','ALGT','CIFR','ALAB','TSM','OKLO','SMR','NNE','LEU','ASPI','LTBR','UCAR','NBIS','RKLB','EOSE','GLW','HOOD','VRT','SOFI','CRWV','META','AOSL']
 
